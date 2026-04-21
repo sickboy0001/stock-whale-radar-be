@@ -1,0 +1,76 @@
+{% extends "base.html" %} {% block title %}Stock Whale Radar - Welcome{%
+endblock %} {% block extra_css %}
+<style>
+  .hero-section {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 4rem 0;
+    margin-bottom: 2rem;
+  }
+  .action-card {
+    transition:
+      transform 0.3s ease,
+      box-shadow 0.3s ease;
+    cursor: pointer;
+    border: none;
+    border-radius: 1rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+  .action-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
+  }
+  .action-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+  }
+  .btn-custom {
+    padding: 0.75rem 2rem;
+    font-size: 1.1rem;
+    border-radius: 0.5rem;
+  }
+</style>
+{% endblock %} {% block content %}
+<div class="hero-section text-center">
+  <div class="container">
+    <h1 class="display-4 fw-bold">Stock Whale Radar</h1>
+    <p class="lead">株式市場の鯨の動きを追跡</p>
+  </div>
+</div>
+
+<div class="container">
+  <div class="row justify-content-center">
+    <div class="col-md-5 mb-4">
+      <div class="card action-card h-100 text-center p-4">
+        <div class="card-body">
+          <div class="action-icon text-primary">
+            <i class="bi bi-speedometer2"></i>
+          </div>
+          <h3 class="card-title">ゲストでダッシュボード</h3>
+          <p class="card-text text-muted">
+            ログインせずにダッシュボードを閲覧できます。
+          </p>
+          <a href="/dashboard" class="btn btn-primary btn-custom mt-3"
+            >ダッシュボード</a
+          >
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-5 mb-4">
+      <div class="card action-card h-100 text-center p-4">
+        <div class="card-body">
+          <div class="action-icon text-success">
+            <i class="bi bi-person-circle"></i>
+          </div>
+          <h3 class="card-title">ログイン</h3>
+          <p class="card-text text-muted">
+            アカウントにログインして、すべての機能を利用。
+          </p>
+          <a href="/login" class="btn btn-success btn-custom mt-3">ログイン</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

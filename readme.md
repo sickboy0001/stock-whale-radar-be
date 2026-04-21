@@ -33,8 +33,3 @@
 └── .github/             # GitHub Actions設定
 ```
 
-## 開発の進め方
-1. `docs/spec.md` に基づき詳細設計を行う。
-2. Turso DBのセットアップ。
-3. FastAPIによるバックエンド実装。
-4. Cloud Runへのデプロイパイプライン構築。

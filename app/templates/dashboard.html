@@ -1,0 +1,200 @@
+{% extends "base.html" %} {% block title %}ダッシュボード - Stock Whale Radar{%
+endblock %} {% block content %}
+<!-- ヘッダー：ユーザー情報またはゲストメッセージ -->
+<div class="row mb-4">
+  <div class="col">
+    <div class="d-flex justify-content-between align-items-center">
+      <h2><i class="bi bi-speedometer2"></i> ダッシュボード</h2>
+      <div>
+        {% if current_user %}
+        <span class="me-3 text-white">
+          <i class="bi bi-person-circle"></i> {{ current_user.username }} 様
+        </span>
+        <a href="/logout" class="btn btn-outline-light btn-sm">
+          <i class="bi bi-box-arrow-right"></i> サインアウト
+        </a>
+        {% else %}
+        <span class="me-3 text-white">
+          <i class="bi bi-person-x"></i> ゲストモード
+        </span>
+        <a href="/login" class="btn btn-outline-light btn-sm">
+          <i class="bi bi-box-arrow-in-right"></i> ログイン
+        </a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ゲストモードの注意メッセージ -->
+{% if is_guest %}
+<div class="alert alert-info" role="alert">
+  <i class="bi bi-info-circle"></i>
+  ゲストモードで閲覧しています。
+  <a href="/login" class="alert-link">ログイン</a
+  >すると、すべての機能を利用できます。
+</div>
+{% endif %}
+
+<div class="row row-cols-1 row-cols-md-3 g-4 mb-4">
+  <!-- 最新大量保有情報 -->
+  <div class="col">
+    <div class="card h-100 border-primary">
+      <div class="card-header bg-primary text-white">
+        最新の変動（トップ 3）
+      </div>
+      <div class="card-body">
+        <ul class="list-group list-group-flush">
+          <li
+            class="list-group-item d-flex justify-content-between align-items-center"
+          >
+            <div>
+              <span class="fw-bold">トヨタ自動車 (7203)</span><br />
+              <small class="text-muted">提出者：ブラックロック・ジャパン</small>
+            </div>
+            <span class="badge bg-success">+0.5%</span>
+          </li>
+          <li
+            class="list-group-item d-flex justify-content-between align-items-center"
+          >
+            <div>
+              <span class="fw-bold">ソニー G (6758)</span><br />
+              <small class="text-muted">提出者：キャピタル・リサーチ</small>
+            </div>
+            <span class="badge bg-danger">-1.2%</span>
+          </li>
+          <li
+            class="list-group-item d-flex justify-content-between align-items-center"
+          >
+            <div>
+              <span class="fw-bold">任天堂 (7974)</span><br />
+              <small class="text-muted">提出者：JP モルガン・アセット</small>
+            </div>
+            <span class="badge bg-success">+0.8%</span>
+          </li>
+        </ul>
+      </div>
+      <div class="card-footer bg-transparent">
+        <a href="#" class="btn btn-sm btn-outline-primary">詳細を見る</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 急増銘柄 -->
+  <div class="col">
+    <div class="card h-100 border-success">
+      <div class="card-header bg-success text-white">
+        保有急増銘柄（1 ヶ月）
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>コード</th>
+                <th>銘柄名</th>
+                <th>増加幅</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>9984</td>
+                <td>ソフトバンク G</td>
+                <td class="text-success">+5.4%</td>
+              </tr>
+              <tr>
+                <td>8035</td>
+                <td>東京エレクトロン</td>
+                <td class="text-success">+3.2%</td>
+              </tr>
+              <tr>
+                <td>6098</td>
+                <td>リクルート HD</td>
+                <td class="text-success">+2.1%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 急減銘柄 -->
+  <div class="col">
+    <div class="card h-100 border-danger">
+      <div class="card-header bg-danger text-white">保有急減銘柄（1 ヶ月）</div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>コード</th>
+                <th>銘柄名</th>
+                <th>減少幅</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>6178</td>
+                <td>日本郵政</td>
+                <td class="text-danger">-4.1%</td>
+              </tr>
+              <tr>
+                <td>8306</td>
+                <td>三菱 UFJ</td>
+                <td class="text-danger">-2.5%</td>
+              </tr>
+              <tr>
+                <td>4568</td>
+                <td>第一三共</td>
+                <td class="text-danger">-1.8%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 最新の報告一覧 -->
+<div class="card shadow-sm mt-4">
+  <div class="card-header bg-white">
+    <h5 class="mb-0">最近の大量保有報告書 (EDINET)</h5>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>提出日時</th>
+            <th>証券コード</th>
+            <th>発行者名</th>
+            <th>報告者名</th>
+            <th>保有割合</th>
+            <th>増減</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>2026/04/21 15:00</td>
+            <td>1234</td>
+            <td>サンプル商事</td>
+            <td>クジラ投資顧問</td>
+            <td>10.5%</td>
+            <td><span class="text-success">+1.2%</span></td>
+          </tr>
+          <tr>
+            <td>2026/04/21 14:30</td>
+            <td>5678</td>
+            <td>テスト工業</td>
+            <td>大海原アセット</td>
+            <td>5.2%</td>
+            <td><span class="text-danger">-0.5%</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

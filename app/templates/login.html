@@ -1,0 +1,128 @@
+{% extends "base.html" %} {% block title %}Login - Stock Whale Radar{% endblock
+%} {% block extra_css %}
+<style>
+  .login-container {
+    max-width: 450px;
+    margin: 4rem auto;
+    padding: 2rem;
+    border-radius: 1rem;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    background: white;
+  }
+  .login-header {
+    text-align: center;
+    margin-bottom: 2rem;
+  }
+  .login-header h2 {
+    color: #333;
+    font-weight: 600;
+  }
+  .divider {
+    display: flex;
+    align-items: center;
+    text-align: center;
+    margin: 1.5rem 0;
+    color: #666;
+  }
+  .divider::before,
+  .divider::after {
+    content: "";
+    flex: 1;
+    border-bottom: 1px solid #ddd;
+  }
+  .divider span {
+    padding: 0 1rem;
+    font-size: 0.9rem;
+  }
+  .btn-google {
+    background-color: #4285f4;
+    color: white;
+    border: none;
+    width: 100%;
+    padding: 0.75rem;
+    border-radius: 0.5rem;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    transition: background-color 0.3s ease;
+  }
+  .btn-google:hover {
+    background-color: #357ae8;
+    color: white;
+  }
+  .btn-back {
+    margin-top: 1rem;
+    width: 100%;
+  }
+  .form-label {
+    font-weight: 500;
+    color: #333;
+  }
+</style>
+{% endblock %} {% block content %}
+<div class="container">
+  <div class="login-container">
+    <div class="login-header">
+      <h2><i class="bi bi-person-circle"></i> ログイン</h2>
+      <p class="text-muted">アカウントにログインしてください</p>
+    </div>
+
+    <!-- ユーザー名/パスワードログイン -->
+    <form action="/auth/login" method="post">
+      <div class="mb-3">
+        <label for="username" class="form-label">ユーザー名</label>
+        <input
+          type="text"
+          class="form-control"
+          id="username"
+          name="username"
+          required
+          autofocus
+        />
+      </div>
+      <div class="mb-3">
+        <label for="password" class="form-label">パスワード</label>
+        <input
+          type="password"
+          class="form-control"
+          id="password"
+          name="password"
+          required
+        />
+      </div>
+      <button type="submit" class="btn btn-primary w-100 btn-lg">
+        ログイン
+      </button>
+    </form>
+
+    <div class="divider">
+      <span>または</span>
+    </div>
+
+    <!-- Google OAuth ログイン -->
+    <a href="/auth/google" class="btn btn-google">
+      <i class="bi bi-google"></i>
+      Google でログイン
+    </a>
+
+    <div class="divider">
+      <span>アカウントをお持ちでない場合</span>
+    </div>
+
+    <!-- サインアップリンク -->
+    <form action="/auth/signup" method="get">
+      <button type="submit" class="btn btn-outline-secondary w-100">
+        アカウント作成
+      </button>
+    </form>
+
+    <form action="/" method="get">
+      <button type="submit" class="btn btn-link btn-back">
+        <i class="bi bi-arrow-left"></i> スタートページに戻る
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}
