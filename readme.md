@@ -32,5 +32,3 @@
 ├── requirements.txt     # 依存ライブラリ
 └── .github/             # GitHub Actions設定
 ```
-
-test
