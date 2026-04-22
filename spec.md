@@ -159,22 +159,3 @@
 
 ---
 
-
-## 4. タスク処理フロー
-
-1.  **GitHub Actions:** `schedule` イベント（cron）で起動。４時間に一回を想定
-2.  **Extraction:** Pythonスクリプトを実行し、EDINET APIから書類一覧やXBRLデータを取得。
-3.  **Loading:** 取得・加工したデータを、TursoのSDKを使ってDBへ保存。ログもTursoへ記載
-    1.  EDINET普通の場合なども、ログへ記載するすること
-4.  **Serving:** Cloud Run上のFastAPIが、Tursoのデータを参照してユーザーに表示。
-
-## 3. 実装上の注意点・アドバイス
-
-### ① EDINET APIの制限とリトライ
-EDINET APIは時折不安定になったり、接続制限がかかることがあります。
-* GitHub Actions側でリトライ処理を組み込むこと。
-* 一度に大量のデータを取得しようとすると、GitHub Actionsの実行時間制限（6時間）やメモリ制限に引っかかる可能性があるため、差分更新（前回取得分からの更新）を基本にするのが無難です。
-
-### ② シークレット管理
-EDINETのAPIキーやTursoのURL/Tokenは、必ずGitHubの **Settings > Secrets and variables > Actions** に保存し、環境変数として読み込むようにしてください。
-

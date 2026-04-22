@@ -49,8 +49,8 @@
     L ユーザー設定
 
 [Admin]    
-    L 取り込みEdinetコード「EdinetcodeDlInfo」ファンドコード「FundcodeDlInfo」
-    L 確認Edinetコード「EdinetcodeDlInfo」ファンドコード「FundcodeDlInfo」
+    L コード取り込み「EdinetcodeDlInfo」ファンドコード「FundcodeDlInfo」
+    L コード確認「EdinetcodeDlInfo」ファンドコード「FundcodeDlInfo」
     L ログ参照（API呼ばれた経緯の表示）
     L データ参照　（３カ月報告一覧、大量保有報告一覧など）
 ```

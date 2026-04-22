@@ -1,0 +1,114 @@
+{% extends "base.html" %} {% block title %}FundcodeDlInfo - Stock Whale Radar{%
+endblock %} {% block header %}FundcodeDlInfo{% endblock %} {% block content %}
+<div class="row">
+  <!-- ファイルアップロードセクション -->
+  <div class="col-md-4">
+    <div class="card shadow-sm">
+      <div class="card-header bg-primary text-white">
+        <h5 class="mb-0">CSV ファイルアップロード</h5>
+      </div>
+      <div class="card-body">
+        <form
+          action="/fundcode-dl-info/upload"
+          method="post"
+          enctype="multipart/form-data"
+        >
+          <div class="mb-3">
+            <label for="file" class="form-label">CSV ファイルを選択</label>
+            <input
+              type="file"
+              class="form-control"
+              id="file"
+              name="file"
+              accept=".csv"
+              required
+            />
+            <div class="form-text">
+              FundcodeDlInfo.csv 形式のファイルを選択してください。
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary w-100">
+            <i class="bi bi-upload me-1"></i>アップロード＆更新
+          </button>
+        </form>
+
+        <hr />
+
+        <div class="alert alert-info">
+          <small>
+            <strong>参考:</strong><br />
+            対象ファイル：<code>docs/memo/20260421/FundcodeDlInfo.csv</code>
+          </small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- データ表示セクション -->
+  <div class="col-md-8">
+    <div class="card shadow-sm">
+      {% if upload_success %}
+      <div class="alert alert-success m-3" role="alert">
+        <strong>アップロード成功!</strong> {{ upload_count }}
+        件のデータを登録しました。
+      </div>
+      {% endif %}
+      <div
+        class="card-header bg-white d-flex justify-content-between align-items-center"
+      >
+        <h5 class="mb-0">FundCode データ</h5>
+        <span class="badge bg-secondary">合計 {{ fund_codes|length }} 件</span>
+      </div>
+      <div class="card-body p-0">
+        {% if fund_codes %}
+        <div
+          class="table-responsive"
+          style="max-height: 600px; overflow-y: auto"
+        >
+          <table class="table table-hover table-sm mb-0">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th>Fund Code</th>
+                <th>証券コード</th>
+                <th>基金名</th>
+                <th>基金名 (カナ)</th>
+                <th>発行体名</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for fund in fund_codes %}
+              <tr>
+                <td><code>{{ fund.fund_code }}</code></td>
+                <td>{{ fund.sec_code }}</td>
+                <td>
+                  {{ fund.fund_name[:15] if fund.fund_name else '' }}{% if
+                  fund.fund_name and fund.fund_name|length > 15 %}...{% endif %}
+                </td>
+                <td>
+                  {{ fund.fund_name_kana[:15] if fund.fund_name_kana else ''
+                  }}{% if fund.fund_name_kana and fund.fund_name_kana|length >
+                  15 %}...{% endif %}
+                </td>
+                <td>
+                  {{ fund.issuer_name[:15] if fund.issuer_name else '' }}{% if
+                  fund.issuer_name and fund.issuer_name|length > 15 %}...{%
+                  endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center py-5">
+          <i class="bi bi-inbox display-4 text-muted"></i>
+          <p class="text-muted mt-3">
+            データがありません。CSV ファイルをアップロードしてください。
+          </p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

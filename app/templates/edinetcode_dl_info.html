@@ -1,0 +1,122 @@
+{% extends "base.html" %} {% block title %}EdinetcodeDlInfo - Stock Whale
+Radar{% endblock %} {% block header %}EdinetcodeDlInfo{% endblock %} {% block
+content %}
+<div class="row">
+  <!-- ファイルアップロードセクション -->
+  <div class="col-md-4">
+    <div class="card shadow-sm">
+      <div class="card-header bg-primary text-white">
+        <h5 class="mb-0">CSV ファイルアップロード</h5>
+      </div>
+      <div class="card-body">
+        <form
+          action="/edinetcode-dl-info/upload"
+          method="post"
+          enctype="multipart/form-data"
+        >
+          <div class="mb-3">
+            <label for="file" class="form-label">CSV ファイルを選択</label>
+            <input
+              type="file"
+              class="form-control"
+              id="file"
+              name="file"
+              accept=".csv"
+              required
+            />
+            <div class="form-text">
+              EdinetcodeDlInfo.csv 形式のファイルを選択してください。
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary w-100">
+            <i class="bi bi-upload me-1"></i>アップロード＆更新
+          </button>
+        </form>
+
+        <hr />
+
+        <div class="alert alert-info">
+          <small>
+            <strong>参考:</strong><br />
+            対象ファイル：<code>docs/memo/20260421/EdinetcodeDlInfo.csv</code>
+          </small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- データ表示セクション -->
+  <div class="col-md-8">
+    <div class="card shadow-sm">
+      {% if upload_success %}
+      <div class="alert alert-success m-3" role="alert">
+        <strong>アップロード成功!</strong> {{ upload_count }}
+        件のデータを登録しました。
+      </div>
+      {% endif %}
+      <div
+        class="card-header bg-white d-flex justify-content-between align-items-center"
+      >
+        <h5 class="mb-0">EdinetcodeDlInfo データ</h5>
+        <span class="badge bg-secondary"
+          >合計 {{ edinet_codes|length }} 件</span
+        >
+      </div>
+      <div class="card-body p-0">
+        {% if edinet_codes %}
+        <div
+          class="table-responsive"
+          style="max-height: 600px; overflow-y: auto"
+        >
+          <table class="table table-hover table-sm mb-0">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th>Edinet Code</th>
+                <th>提出者名</th>
+                <th>提出者名 (英字)</th>
+                <th>証券コード</th>
+                <th>業種</th>
+                <th>所在地</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for code in edinet_codes %}
+              <tr>
+                <td><code>{{ code.edinet_code }}</code></td>
+                <td>
+                  {{ code.filer_name[:15] if code.filer_name else '' }}{% if
+                  code.filer_name and code.filer_name|length > 15 %}...{% endif
+                  %}
+                </td>
+                <td>
+                  {{ code.filer_name_en[:15] if code.filer_name_en else '' }}{%
+                  if code.filer_name_en and code.filer_name_en|length > 15
+                  %}...{% endif %}
+                </td>
+                <td>{{ code.sec_code }}</td>
+                <td>
+                  {{ code.industry[:10] if code.industry else '' }}{% if
+                  code.industry and code.industry|length > 10 %}...{% endif %}
+                </td>
+                <td>
+                  {{ code.address[:15] if code.address else '' }}{% if
+                  code.address and code.address|length > 15 %}...{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center py-5">
+          <i class="bi bi-inbox display-4 text-muted"></i>
+          <p class="text-muted mt-3">
+            データがありません。CSV ファイルをアップロードしてください。
+          </p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

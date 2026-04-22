@@ -1,15 +1,19 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Request, Form
+from fastapi import FastAPI, Depends, HTTPException, status, Request, Form, File, UploadFile
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import delete
 from datetime import timedelta, datetime
 from typing import List, Optional
 import os
 import secrets
 import httpx
 from urllib.parse import urlencode
+import csv
+import io
+import asyncio
 
 from . import models, schemas, auth, database
 
@@ -28,8 +32,7 @@ GOOGLE_CLIENT_SECRET = database.settings.AUTH_GOOGLE_SECRET
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
-REDIRECT_URI = "http://localhost:8000/auth/google/callback"  # 本番環境では適切な URL に変更
-
+REDIRECT_URI = database.settings.REDIRECT_URI  # .env から取得
 # --- HTML Routes (SSR) ---
 @app.get("/", response_class=HTMLResponse)
 async def index_page(request: Request):
@@ -68,6 +71,228 @@ async def logout(request: Request):
     response.delete_cookie("access_token")
     return response
 
+@app.get("/edinetcode-dl-info", response_class=HTMLResponse)
+async def edinetcode_dl_info_page(request: Request, db: Session = Depends(database.get_db)):
+    """EdinetcodeDlInfo ページ"""
+    edinet_codes = db.query(models.EdinetCode).all()
+    return templates.TemplateResponse(
+        request=request, name="edinetcode_dl_info.html", context={
+            "edinet_codes": edinet_codes
+        }
+    )
+
+@app.post("/edinetcode-dl-info/upload")
+async def edinetcode_dl_info_upload(
+    file: UploadFile = File(...),
+    db: Session = Depends(database.get_db)
+):
+    """
+    CSV ファイルをアップロードし、edinet_codes テーブルを更新する
+    """
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="CSV ファイルのみ許可されます")
+
+    # ファイル内容をメモリに読み込み（file.file を使用して同期読み取り）
+    contents = file.file.read()
+
+    # ブロッキング操作をスレッドプールで実行
+    def process_and_save():
+        try:
+            # cp932 エンコーディングでデコード（BOM ありの場合も対応）
+            if contents[:3] == b'\x9c\x5b\x57': # cp932 BOM
+                text = contents[3:].decode('cp932')
+            else:
+                text = contents.decode('cp932', errors='replace')
+
+            # CSV パース
+            reader = csv.reader(io.StringIO(text))
+            rows = list(reader)
+
+            if len(rows) < 2:
+                raise ValueError("CSV ファイルが空、または形式が正しくありません")
+
+            # 1 行目（インデックス 1）が実際のヘッダー、0 行目はメタデータ
+            # データは 2 行目（インデックス 2）から開始
+            data_rows = rows[2:]
+
+            # 既存のデータを削除
+            db.query(models.EdinetCode).delete()
+
+            # 新規データを挿入
+            for row in data_rows:
+                if len(row) < 13: # 必要なカラム数
+                    continue
+
+                # 空の値は None に変換
+                def safe_int(val):
+                    try:
+                        return int(val) if val and val.strip() else None
+                    except (ValueError, TypeError):
+                        return None
+
+                edinet_code = row[0].strip() if row[0] else None
+                if not edinet_code:
+                    continue
+
+                edinet_code_obj = models.EdinetCode(
+                    edinet_code=edinet_code,
+                    submitter_type=row[1].strip() if len(row) > 1 and row[1] else None,
+                    listing_status=row[2].strip() if len(row) > 2 and row[2] else None,
+                    consolidated=row[3].strip() if len(row) > 3 and row[3] else None,
+                    capital=safe_int(row[4]) if len(row) > 4 else None,
+                    settlement_date=row[5].strip() if len(row) > 5 and row[5] else None,
+                    filer_name=row[6].strip() if len(row) > 6 and row[6] else None,
+                    filer_name_en=row[7].strip() if len(row) > 7 and row[7] else None,
+                    filer_name_kana=row[8].strip() if len(row) > 8 and row[8] else None,
+                    address=row[9].strip() if len(row) > 9 and row[9] else None,
+                    industry=row[10].strip() if len(row) > 10 and row[10] else None,
+                    sec_code=row[11].strip() if len(row) > 11 and row[11] else None,
+                    jcn=row[12].strip() if len(row) > 12 and row[12] else None,
+                )
+                db.add(edinet_code_obj)
+
+            db.commit()
+
+            # 更新後のデータを取得
+            return db.query(models.EdinetCode).all()
+
+        except UnicodeDecodeError:
+            db.rollback()
+            raise ValueError("ファイルのエンコーディングが正しくありません。cp932 (Shift-JIS) 形式の CSV を使用してください。")
+        except Exception as e:
+            db.rollback()
+            raise e
+
+    try:
+        # ブロッキング操作をスレッドプールで実行
+        edinet_codes = await asyncio.to_thread(process_and_save)
+
+        # テンプレートレンダリングもスレッドプールで実行
+        response = await asyncio.to_thread(
+            templates.TemplateResponse,
+            request=request,
+            name="edinetcode_dl_info.html",
+            context={
+                "edinet_codes": edinet_codes,
+                "upload_success": True,
+                "upload_count": len(edinet_codes)
+            }
+        )
+        return response
+
+    except ValueError as e:
+        if "エンコーディング" in str(e) or "形式が正しくありません" in str(e):
+            raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"アップロード中にエラーが発生しました：{str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"アップロード中にエラーが発生しました：{str(e)}")
+
+@app.get("/fundcode-dl-info", response_class=HTMLResponse)
+async def fundcode_dl_info_page(request: Request, db: Session = Depends(database.get_db)):
+    """FundcodeDlInfo ページ"""
+    fund_codes = await asyncio.to_thread(lambda: db.query(models.FundCode).all())
+    return templates.TemplateResponse(
+        request=request, name="fundcode_dl_info.html", context={"fund_codes": fund_codes}
+    )
+
+@app.post("/fundcode-dl-info/upload")
+async def fundcode_dl_info_upload(
+    file: UploadFile = File(...),
+    db: Session = Depends(database.get_db)
+):
+    """
+    CSV ファイルをアップロードし、fund_codes テーブルを更新する
+    """
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="CSV ファイルのみ許可されます")
+
+    # ファイル内容をメモリに読み込み（file.file を使用して同期読み取り）
+    contents = file.file.read()
+
+    # ブロッキング操作をスレッドプールで実行
+    def process_and_save():
+        try:
+            # cp932 エンコーディングでデコード（BOM ありの場合も対応）
+            if contents[:3] == b'\x9c\x5b\x57': # cp932 BOM
+                text = contents[3:].decode('cp932')
+            else:
+                text = contents.decode('cp932', errors='replace')
+
+            # CSV パース
+            reader = csv.reader(io.StringIO(text))
+            rows = list(reader)
+
+            if len(rows) < 2:
+                raise ValueError("CSV ファイルが空、または形式が正しくありません")
+
+            # 1 行目（インデックス 1）が実際のヘッダー、0 行目はメタデータ
+            # データは 2 行目（インデックス 2）から開始
+            data_rows = rows[2:]
+
+            # 既存のデータを削除
+            db.query(models.FundCode).delete()
+
+            # 新規データを挿入
+            for row in data_rows:
+                if len(row) < 8: # 必要なカラム数
+                    continue
+
+                # 空の値は None に変換
+                def safe_str(val):
+                    return val.strip() if val and val.strip() else None
+
+                fund_code = row[0].strip() if row[0] else None
+                if not fund_code:
+                    continue
+
+                fund_code_obj = models.FundCode(
+                    fund_code=fund_code,
+                    sec_code=safe_str(row[1]) if len(row) > 1 else None,
+                    fund_name=safe_str(row[2]) if len(row) > 2 else None,
+                    fund_name_kana=safe_str(row[3]) if len(row) > 3 else None,
+                    security_type=safe_str(row[4]) if len(row) > 4 else None,
+                    period_1=safe_str(row[5]) if len(row) > 5 else None,
+                    period_2=safe_str(row[6]) if len(row) > 6 else None,
+                    edinet_code=safe_str(row[7]) if len(row) > 7 else None,
+                    issuer_name=safe_str(row[8]) if len(row) > 8 else None,
+                )
+                db.add(fund_code_obj)
+
+            db.commit()
+
+            # 更新後のデータを取得
+            return db.query(models.FundCode).all()
+
+        except UnicodeDecodeError:
+            db.rollback()
+            raise ValueError("ファイルのエンコーディングが正しくありません。cp932 (Shift-JIS) 形式の CSV を使用してください。")
+        except Exception as e:
+            db.rollback()
+            raise e
+
+    try:
+        # ブロッキング操作をスレッドプールで実行
+        fund_codes = await asyncio.to_thread(process_and_save)
+
+        # テンプレートレンダリングもスレッドプールで実行
+        response = await asyncio.to_thread(
+            templates.TemplateResponse,
+            request=request,
+            name="fundcode_dl_info.html",
+            context={
+                "fund_codes": fund_codes,
+                "upload_success": True,
+                "upload_count": len(fund_codes)
+            }
+        )
+        return response
+
+    except ValueError as e:
+        if "エンコーディング" in str(e) or "形式が正しくありません" in str(e):
+            raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"アップロード中にエラーが発生しました：{str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"アップロード中にエラーが発生しました：{str(e)}")
 # --- API Routes ---
 @app.get("/api")
 def read_api_root():

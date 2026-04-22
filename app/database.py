@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     AUTH_GOOGLE_ID: Optional[str] = None
     AUTH_GOOGLE_SECRET: Optional[str] = None
     AUTH_SECRET: Optional[str] = None
+    REDIRECT_URI: str = "http://localhost:8000/auth/google/callback"
 
     # External API
     EXTERNAL_API_URL: Optional[str] = None
