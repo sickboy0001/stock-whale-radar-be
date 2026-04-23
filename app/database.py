@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "sqlite:///./test.db"
+    DATABASE_URL: Optional[str] = "sqlite:///./test.db"
     DATABASE_AUTH_TOKEN: Optional[str] = None
     SECRET_KEY: str = "your-secret-key"
     ALGORITHM: str = "HS256"
