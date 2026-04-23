@@ -32,3 +32,9 @@
 ├── requirements.txt     # 依存ライブラリ
 └── .github/             # GitHub Actions設定
 ```
+
+
+## history
+
+* 2026/04/24
+  * Deploy https://stock-whale-radar-be-217119007226.asia-northeast1.run.app/
