@@ -62,3 +62,58 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     username: Optional[str] = None
+
+# --- Sync Job Schemas ---
+class SyncJobBase(BaseModel):
+    job_id: str
+    job_type: str
+    status: str
+    total_docs_found: int = 0
+    target_docs_count: int = 0
+    success_count: int = 0
+    error_count: int = 0
+
+class SyncJobCreate(SyncJobBase):
+    pass
+
+class SyncJob(SyncJobBase):
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+# --- Document Task Schemas ---
+class DocumentTaskBase(BaseModel):
+    doc_id: str
+    job_id: str
+    status: str
+    retry_count: int = 0
+    next_retry_at: Optional[datetime] = None
+
+class DocumentTaskCreate(DocumentTaskBase):
+    pass
+
+class DocumentTask(DocumentTaskBase):
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# --- System Event Schemas ---
+class SystemEventBase(BaseModel):
+    event_level: str
+    event_category: str
+    doc_id: Optional[str] = None
+    message: str
+    error_details: Optional[str] = None
+
+class SystemEventCreate(SystemEventBase):
+    pass
+
+class SystemEvent(SystemEventBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

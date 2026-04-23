@@ -102,3 +102,37 @@ class JointHolder(Base):
     filer_edinet_code = Column(String)
     individual_holding_ratio = Column(Float)
     context_ref = Column(String)
+
+class SyncJob(Base):
+    __tablename__ = "sync_jobs"
+
+    job_id = Column(String, primary_key=True, index=True)
+    job_type = Column(String, nullable=False)
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    finished_at = Column(DateTime(timezone=True))
+    status = Column(String, nullable=False) # 'running', 'success', 'failed'
+    total_docs_found = Column(Integer, default=0)
+    target_docs_count = Column(Integer, default=0)
+    success_count = Column(Integer, default=0)
+    error_count = Column(Integer, default=0)
+
+class DocumentTask(Base):
+    __tablename__ = "document_tasks"
+
+    doc_id = Column(String, primary_key=True, index=True)
+    job_id = Column(String, ForeignKey("sync_jobs.job_id"), nullable=False)
+    status = Column(String, nullable=False) # 'pending', 'processing', 'completed', 'failed'
+    retry_count = Column(Integer, default=0)
+    next_retry_at = Column(DateTime(timezone=True))
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+
+class SystemEvent(Base):
+    __tablename__ = "system_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_level = Column(String, nullable=False) # 'INFO', 'WARN', 'ERROR', 'FATAL'
+    event_category = Column(String, nullable=False) # 'batch_sync', 'xbrl_parse', 'api_fetch', 'system'
+    doc_id = Column(String, nullable=True)
+    message = Column(String, nullable=False)
+    error_details = Column(String, nullable=True) # JSON or Stacktrace
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

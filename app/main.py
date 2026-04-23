@@ -15,30 +15,31 @@ import csv
 import io
 import asyncio
 
-from . import models, schemas, auth, database
+from . import models, schemas, auth, database, google_auth
 
 # データベースのテーブル作成
 models.Base.metadata.create_all(bind=database.engine)
 
 app = FastAPI(title="Stock Whale Radar API")
 
+# ルーターの登録
+app.include_router(google_auth.router)
+
 # 静的ファイルとテンプレートの設定
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
-# Google OAuth 設定
-GOOGLE_CLIENT_ID = database.settings.AUTH_GOOGLE_ID
-GOOGLE_CLIENT_SECRET = database.settings.AUTH_GOOGLE_SECRET
-GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/auth"
-GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
-GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
-REDIRECT_URI = database.settings.REDIRECT_URI  # .env から取得
 # --- HTML Routes (SSR) ---
 @app.get("/", response_class=HTMLResponse)
-async def index_page(request: Request):
+async def index_page(
+    request: Request,
+    current_user: Optional[models.User] = Depends(auth.get_current_user_optional),
+):
     """スタートページ（サインアウト後に表示）"""
     return templates.TemplateResponse(
-        request=request, name="index.html", context={}
+        request=request,
+        name="index.html",
+        context={"current_user": current_user},
     )
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -72,19 +73,26 @@ async def logout(request: Request):
     return response
 
 @app.get("/edinetcode-dl-info", response_class=HTMLResponse)
-async def edinetcode_dl_info_page(request: Request, db: Session = Depends(database.get_db)):
+async def edinetcode_dl_info_page(
+    request: Request,
+    db: Session = Depends(database.get_db),
+    current_user: Optional[models.User] = Depends(auth.get_current_user_optional),
+):
     """EdinetcodeDlInfo ページ"""
     edinet_codes = db.query(models.EdinetCode).all()
     return templates.TemplateResponse(
         request=request, name="edinetcode_dl_info.html", context={
-            "edinet_codes": edinet_codes
+            "edinet_codes": edinet_codes,
+            "current_user": current_user,
         }
     )
 
 @app.post("/edinetcode-dl-info/upload")
 async def edinetcode_dl_info_upload(
+    request: Request,
     file: UploadFile = File(...),
-    db: Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db),
+    current_user: Optional[models.User] = Depends(auth.get_current_user_optional),
 ):
     """
     CSV ファイルをアップロードし、edinet_codes テーブルを更新する
@@ -174,6 +182,7 @@ async def edinetcode_dl_info_upload(
             name="edinetcode_dl_info.html",
             context={
                 "edinet_codes": edinet_codes,
+                "current_user": current_user,
                 "upload_success": True,
                 "upload_count": len(edinet_codes)
             }
@@ -188,17 +197,26 @@ async def edinetcode_dl_info_upload(
         raise HTTPException(status_code=500, detail=f"アップロード中にエラーが発生しました：{str(e)}")
 
 @app.get("/fundcode-dl-info", response_class=HTMLResponse)
-async def fundcode_dl_info_page(request: Request, db: Session = Depends(database.get_db)):
+async def fundcode_dl_info_page(
+    request: Request,
+    db: Session = Depends(database.get_db),
+    current_user: Optional[models.User] = Depends(auth.get_current_user_optional),
+):
     """FundcodeDlInfo ページ"""
     fund_codes = await asyncio.to_thread(lambda: db.query(models.FundCode).all())
     return templates.TemplateResponse(
-        request=request, name="fundcode_dl_info.html", context={"fund_codes": fund_codes}
+        request=request, name="fundcode_dl_info.html", context={
+            "fund_codes": fund_codes,
+            "current_user": current_user,
+        }
     )
 
 @app.post("/fundcode-dl-info/upload")
 async def fundcode_dl_info_upload(
+    request: Request,
     file: UploadFile = File(...),
-    db: Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db),
+    current_user: Optional[models.User] = Depends(auth.get_current_user_optional),
 ):
     """
     CSV ファイルをアップロードし、fund_codes テーブルを更新する
@@ -281,6 +299,7 @@ async def fundcode_dl_info_upload(
             name="fundcode_dl_info.html",
             context={
                 "fund_codes": fund_codes,
+                "current_user": current_user,
                 "upload_success": True,
                 "upload_count": len(fund_codes)
             }
@@ -348,100 +367,6 @@ def login(
         return response
     
     return {"access_token": access_token, "token_type": "bearer"}
-
-@app.get("/auth/google")
-async def google_login(request: Request):
-    """Google OAuth ログイン開始"""
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        raise HTTPException(status_code=500, detail="Google OAuth is not configured")
-    
-    state = secrets.token_urlsafe(32)
-    redirect_uri = str(request.url_for("google_callback"))
-    
-    # Google 認証 URL を構築
-    params = {
-        "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": redirect_uri,
-        "response_type": "code",
-        "scope": "openid email profile",
-        "state": state,
-        "access_type": "offline",
-        "prompt": "consent"
-    }
-    
-    auth_url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
-    return RedirectResponse(url=auth_url)
-
-@app.get("/auth/google/callback")
-async def google_callback(request: Request, code: str = None, state: str = None, db: Session = Depends(database.get_db)):
-    """Google OAuth コールバック処理"""
-    if not code:
-        raise HTTPException(status_code=400, detail="Authorization code not provided")
-    
-    try:
-        # トークン取得
-        async with httpx.AsyncClient() as client:
-            token_response = await client.post(
-                GOOGLE_TOKEN_URL,
-                data={
-                    "client_id": GOOGLE_CLIENT_ID,
-                    "client_secret": GOOGLE_CLIENT_SECRET,
-                    "code": code,
-                    "grant_type": "authorization_code",
-                    "redirect_uri": str(request.url_for("google_callback"))
-                }
-            )
-            token_data = token_response.json()
-            
-            if "access_token" not in token_data:
-                raise HTTPException(status_code=400, detail="Failed to get access token")
-            
-            access_token = token_data["access_token"]
-            
-            # ユーザー情報取得
-            user_info_response = await client.get(
-                GOOGLE_USERINFO_URL,
-                headers={"Authorization": f"Bearer {access_token}"}
-            )
-            user_info = user_info_response.json()
-            
-            email = user_info.get("email")
-            name = user_info.get("name", email.split("@")[0])
-            
-            # ユーザーが存在するか確認
-            user = db.query(models.User).filter(models.User.email == email).first()
-            
-            if not user:
-                # 新規ユーザー作成
-                hashed_password = auth.get_password_hash(secrets.token_urlsafe(32))
-                user = models.User(
-                    username=name.replace(" ", "_").lower(),
-                    email=email,
-                    hashed_password=hashed_password
-                )
-                db.add(user)
-                db.commit()
-                db.refresh(user)
-            
-            # アクセストークン発行
-            access_token_expires = timedelta(minutes=database.settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-            jwt_token = auth.create_access_token(
-                data={"sub": user.username}, expires_delta=access_token_expires
-            )
-            
-            # ログイン後にリダイレクト
-            response = RedirectResponse(url="/dashboard", status_code=status.HTTP_302_FOUND)
-            response.set_cookie(
-                key="access_token",
-                value=jwt_token,
-                httponly=True,
-                max_age=access_token_expires.total_seconds(),
-                path="/"
-            )
-            return response
-            
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Google OAuth error: {str(e)}")
 
 @app.post("/auth/logout")
 async def api_logout():
