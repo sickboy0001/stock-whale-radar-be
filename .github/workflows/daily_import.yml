@@ -46,10 +46,16 @@ jobs:
         run: |
           echo "Executing import for ${{ steps.dates.outputs.start_date }} to ${{ steps.dates.outputs.end_date }}"
 
-          # URL のデバッグ出力（シークレットは出力しない）
-          echo "Target URL: ${{ secrets.EXTERNAL_API_URL }}/admin/import_daily_status/import"
+          # EXTERNAL_API_URL の末尾のスラッシュを除去
+          BASE_URL="${{ secrets.EXTERNAL_API_URL }}"
+          BASE_URL="${BASE_URL%/}"  # 末尾の / を削除
 
-          curl -v -X POST "${{ secrets.EXTERNAL_API_URL }}/admin/import_daily_status/import" \
+          # 完全な URL を構築
+          API_URL="${BASE_URL}/admin/import_daily_status/import"
+
+          echo "Target URL: ${API_URL}"
+
+          curl -v -X POST "${API_URL}" \
           -H "X-FERNET-KEY: ${{ secrets.FERNET_KEY }}" \
           -F "start_date=${{ steps.dates.outputs.start_date }}" \
           -F "end_date=${{ steps.dates.outputs.end_date }}" \

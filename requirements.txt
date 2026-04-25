@@ -11,3 +11,4 @@ pandas
 httpx
 email-validator
 jinja2
+lxml
