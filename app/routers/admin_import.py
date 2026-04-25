@@ -23,6 +23,46 @@ templates = Jinja2Templates(directory="app/templates")
 logger = logging.getLogger(__name__)
 
 EDINET_API_KEY = os.getenv("EDINET_API_KEY")
+FERNET_KEY = os.getenv("FERNET_KEY")
+
+# --- 認証ヘルパー ---
+async def verify_admin_or_key(
+    request: Request,
+    current_user: models.User = Depends(auth.get_current_user_optional)
+):
+    """
+    管理者セッション、または X-FERNET-KEY ヘッダーによる認証
+    """
+    # 1. セッション認証（ブラウザ用）
+    if current_user and current_user.is_admin:
+        return current_user
+    
+    # 2. APIキー認証（GitHub Actions 等用）
+    api_key = request.headers.get("X-FERNET-KEY")
+    if api_key and api_key == FERNET_KEY:
+        # ダミーのユーザーオブジェクトを返すか、単に True を返す
+        return None
+        
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="管理者権限または有効なAPIキーが必要です"
+    )
+
+# 管理者認証（ダッシュボード表示用：基本はこれ）
+async def verify_admin(
+    current_user: models.User = Depends(auth.get_current_user_optional)
+):
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="ログインが必要です"
+        )
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="管理者権限が必要です"
+        )
+    return current_user
 
 # --- 内部用ヘルパー：システムイベントの記録 ---
 def log_system_event(db: Session, level: str, category: str, message: str, doc_id: str = None, error_details: str = None):
@@ -85,7 +125,7 @@ async def process_single_document(db: Session, doc_id: str, metadata: dict, job_
                     if xbrl_files:
                         with z.open(xbrl_files[0]) as f:
                             xbrl_content = f.read()
-                            # インポーター呼び出し (edinet_importer 側でも task.status = 'completed' になる)
+                            # インポーター呼び出し
                             result = edinet_importer.import_document_to_db(
                                 db, doc_id, xbrl_content, metadata, job_id
                             )
@@ -137,7 +177,7 @@ async def background_import_task(start_date: str, end_date: str, db_session_fact
                 models.ImportDailyStatus.target_date == target_date_str
             ).first()
             
-            # すでに完了している場合のスキップ処理 (フラグがOFFの場合のみ)
+            # すでに完了している場合のスキップ処理
             if not include_completed and status_row and status_row.status == 'completed':
                 logger.info(f"Skip {target_date_str} as it is already completed")
                 continue
@@ -219,22 +259,6 @@ async def background_import_task(start_date: str, end_date: str, db_session_fact
     finally:
         db.close()
 
-# 管理者認証（クッキーからの認証に対応）
-async def verify_admin(
-    current_user: models.User = Depends(auth.get_current_user_optional)
-):
-    if not current_user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="ログインが必要です"
-        )
-    if not current_user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="管理者権限が必要です"
-        )
-    return current_user
-
 # =========================================================
 # 1. ダッシュボード画面表示 (Daily Status)
 # =========================================================
@@ -259,7 +283,7 @@ async def admin_dashboard(
     # テンプレートで使いやすいように辞書化
     month_status = {row.target_date: row.status for row in month_status_rows}
     
-    # カレンダー描画用の日付リスト (1日〜末日)
+    # カレンダー描画用の日付リスト
     _, last_day = calendar.monthrange(today.year, today.month)
     days_in_month = []
     for i in range(1, last_day + 1):
@@ -290,9 +314,8 @@ async def execute_import(
     end_date: str = Form(...),
     include_completed: str = Form(None),
     db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(verify_admin)
+    _auth = Depends(verify_admin_or_key)
 ):
-    # バックグラウンドタスクの追加
     is_include = include_completed == "on"
     background_tasks.add_task(
         background_import_task, 
@@ -315,9 +338,8 @@ async def retry_import(
     target_date: str,
     background_tasks: BackgroundTasks,
     db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(verify_admin)
+    _auth = Depends(verify_admin_or_key)
 ):
-    # 個別再取得の場合は常に上書き(include_completed=True)扱いで実行
     background_tasks.add_task(
         background_import_task, 
         target_date, 
@@ -328,7 +350,7 @@ async def retry_import(
     return {"status": "success", "message": f"{target_date} の再取得を開始しました。"}
 
 # =========================================================
-# 2. 取り込みテスト画面 (統合版)
+# 2. 取り込みテスト画面
 # =========================================================
 @test_router.get("/", response_class=HTMLResponse)
 async def test_import_page(
@@ -347,7 +369,7 @@ async def test_import_page(
 @test_router.get("/list_documents")
 async def list_documents(
     date: str,
-    current_user: models.User = Depends(verify_admin)
+    _auth = Depends(verify_admin_or_key)
 ):
     url = f"https://api.edinet-fsa.go.jp/api/v2/documents.json"
     params = {
@@ -373,7 +395,7 @@ async def import_document(
     doc_id: str,
     request: Request,
     db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(verify_admin)
+    _auth = Depends(verify_admin_or_key)
 ):
     try:
         metadata = await request.json()
@@ -435,12 +457,8 @@ async def import_document(
 async def import_all_for_date(
     background_tasks: BackgroundTasks,
     date: str = Form(...),
-    current_user: models.User = Depends(verify_admin)
+    _auth = Depends(verify_admin_or_key)
 ):
-    """
-    指定日の全書類（対象のみ）を一括インポートする（バックグラウンド実行）
-    ※この操作は常に上書き（強制再取得）扱いで実行します
-    """
     background_tasks.add_task(
         background_import_task, 
         date, 

@@ -1,0 +1,54 @@
+name: Daily EDINET Import
+
+# 毎日 2 時に自動実行、および手動実行を許可
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: "開始日 (YYYY-MM-DD) - 空の場合は 1 日前"
+        required: false
+      end_date:
+        description: "終了日 (YYYY-MM-DD) - 空の場合は開始日と同じ"
+        required: false
+      include_completed:
+        description: "完了済みの書類も再取得するか (on/off)"
+        required: false
+        default: "off"
+
+jobs:
+  import-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Calculate target dates
+        id: dates
+        run: |
+          # 日付の決定ロジック（未指定の場合は 1 日前）
+          if [ "${{ github.event.inputs.start_date }}" != "" ]; then
+            START_DATE="${{ github.event.inputs.start_date }}"
+            if [ "${{ github.event.inputs.end_date }}" != "" ]; then
+              END_DATE="${{ github.event.inputs.end_date }}"
+            else
+              END_DATE=$START_DATE
+            fi
+          else
+            # 未指定の場合は 1 日前
+            START_DATE=$(date -d 'yesterday' +'%Y-%m-%d')
+            END_DATE=$START_DATE
+          fi
+
+          echo "start_date=$START_DATE" >> $GITHUB_OUTPUT
+          echo "end_date=$END_DATE" >> $GITHUB_OUTPUT
+          echo "include_completed=${{ github.event.inputs.include_completed || 'off' }}" >> $GITHUB_OUTPUT
+
+      - name: Request EDINET Import
+        run: |
+          echo "Executing import for ${{ steps.dates.outputs.start_date }} to ${{ steps.dates.outputs.end_date }}"
+
+          curl -X POST "${{ secrets.EXTERNAL_API_URL }}/admin/import_daily_status/import" \
+            -H "X-FERNET-KEY: ${{ secrets.FERNET_KEY }}" \
+            -F "start_date=${{ steps.dates.outputs.start_date }}" \
+            -F "end_date=${{ steps.dates.outputs.end_date }}" \
+            -F "include_completed=${{ steps.dates.outputs.include_completed }}" \
+            --fail
