@@ -50,5 +50,4 @@ jobs:
             -H "X-FERNET-KEY: ${{ secrets.FERNET_KEY }}" \
             -F "start_date=${{ steps.dates.outputs.start_date }}" \
             -F "end_date=${{ steps.dates.outputs.end_date }}" \
-            -F "include_completed=${{ steps.dates.outputs.include_completed }}" \
-            --fail
+            -F "include_completed=${{ steps.dates.outputs.include_completed }}"
