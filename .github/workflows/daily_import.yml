@@ -46,8 +46,11 @@ jobs:
         run: |
           echo "Executing import for ${{ steps.dates.outputs.start_date }} to ${{ steps.dates.outputs.end_date }}"
 
-          curl -X POST "${{ secrets.EXTERNAL_API_URL }}/admin/import_daily_status/import" \
-            -H "X-FERNET-KEY: ${{ secrets.FERNET_KEY }}" \
-            -F "start_date=${{ steps.dates.outputs.start_date }}" \
-            -F "end_date=${{ steps.dates.outputs.end_date }}" \
-            -F "include_completed=${{ steps.dates.outputs.include_completed }}"
+          # URL のデバッグ出力（シークレットは出力しない）
+          echo "Target URL: ${{ secrets.EXTERNAL_API_URL }}/admin/import_daily_status/import"
+
+          curl -v -X POST "${{ secrets.EXTERNAL_API_URL }}/admin/import_daily_status/import" \
+          -H "X-FERNET-KEY: ${{ secrets.FERNET_KEY }}" \
+          -F "start_date=${{ steps.dates.outputs.start_date }}" \
+          -F "end_date=${{ steps.dates.outputs.end_date }}" \
+          -F "include_completed=${{ steps.dates.outputs.include_completed }}"
