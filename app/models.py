@@ -72,36 +72,50 @@ class FundCode(Base):
 class Document(Base):
     __tablename__ = "documents"
 
-    doc_id = Column(String, primary_key=True, index=True)
-    seq_number = Column(Integer)
-    submit_date_time = Column(DateTime, index=True)
-    edinet_code = Column(String, ForeignKey("edinet_codes.edinet_code"))
-    doc_description = Column(String)
-    doc_type_code = Column(String)
-    parent_doc_id = Column(String)
-    withdrawal_status = Column(Integer, default=0)
-    legal_status = Column(Integer)
+    doc_id = Column(String, primary_key=True, index=True) # docID
+    submit_datetime = Column(DateTime, index=True) # submitDateTime
+    ordinance_code = Column(String) # ordinanceCode
+    form_code = Column(String) # formCode
+    doc_type_code = Column(String) # docTypeCode
+    doc_description = Column(String) # docDescription
+    submitter_edinet_code = Column(String, index=True) # edinetCode
+    submitter_name = Column(String) # filerName
+    sec_code = Column(String, index=True) # secCode (提出者の証券コード 5桁)
+    jcn = Column(String) # JCN
+    fund_code = Column(String) # fundCode
+    issuer_edinet_code = Column(String, index=True) # issuerEdinetCode
+    subject_edinet_code = Column(String, index=True) # subjectEdinetCode
+    issuer_name = Column(String) # 名前解決した企業名
+    withdrawal_status = Column(Integer, default=0) # withdrawalStatus
+    doc_info_edit_status = Column(Integer, default=0) # docInfoEditStatus
+    disclosure_status = Column(Integer, default=0) # disclosureStatus
+    xbrl_flag = Column(Integer, default=0) # xbrlFlag
+    pdf_flag = Column(Integer, default=0) # pdfFlag
+    csv_flag = Column(Integer, default=0) # csvFlag
+    legal_status = Column(Integer, default=1) # legalStatus
+    processed_status = Column(Integer, default=0) # 解析ステータス (独自)
 
-class SubstantialReport(Base):
-    __tablename__ = "substantial_reports"
+class OwnershipReport(Base):
+    __tablename__ = "ownership_reports"
 
-    doc_id = Column(String, ForeignKey("documents.doc_id"), primary_key=True)
-    obligation_date = Column(Date, index=True)
-    issuer_edinet_code = Column(String, index=True)
-    issuer_name = Column(String)
-    holding_ratio = Column(Float)
-    prev_holding_ratio = Column(Float)
-    holding_purpose = Column(String)
-    total_number_of_shares = Column(Integer)
+    id = Column(Integer, primary_key=True, index=True)
+    doc_id = Column(String, ForeignKey("documents.doc_id"), unique=True)
+    is_latest = Column(Integer, default=1) # 1:最新, 0:訂正等で無効
+    obligation_date = Column(Date, index=True) # 報告義務発生日
+    target_company_name = Column(String) # 買われた会社の名称
+    holding_purpose = Column(String) # 保有目的
+    holding_ratio = Column(Float) # 株券等保有割合（今回）
+    prev_holding_ratio = Column(Float) # 株券等保有割合（前回）
+    important_contracts = Column(String) # 担保契約等重要な契約
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class JointHolder(Base):
     __tablename__ = "joint_holders"
 
     id = Column(Integer, primary_key=True, index=True)
     doc_id = Column(String, ForeignKey("documents.doc_id"))
-    filer_edinet_code = Column(String)
-    individual_holding_ratio = Column(Float)
-    context_ref = Column(String)
+    holder_name = Column(String)
+    holding_ratio = Column(Float)
 
 class SyncJob(Base):
     __tablename__ = "sync_jobs"
@@ -136,3 +150,15 @@ class SystemEvent(Base):
     message = Column(String, nullable=False)
     error_details = Column(String, nullable=True) # JSON or Stacktrace
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class ImportDailyStatus(Base):
+    __tablename__ = "import_daily_status"
+
+    target_date = Column(String, primary_key=True, index=True) # 'YYYY-MM-DD'
+    status = Column(String, nullable=False, default="pending") # 'pending', 'processing', 'completed', 'failed'
+    total_docs_count = Column(Integer, default=0)
+    target_docs_count = Column(Integer, default=0)
+    success_count = Column(Integer, default=0)
+    last_run_start_at = Column(DateTime(timezone=True))
+    last_run_end_at = Column(DateTime(timezone=True))
+    error_message = Column(String)

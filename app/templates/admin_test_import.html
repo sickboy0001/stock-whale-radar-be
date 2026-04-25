@@ -1,0 +1,491 @@
+{% extends "base.html" %} {% block title %}EDINET 取り込みテスト - Stock Whale
+Radar{% endblock %} {% block header %}EDINET 取り込みテスト{% endblock %} {%
+block extra_css %}
+<style>
+  .log-container {
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    font-family: "Consolas", "Monaco", "Courier New", monospace;
+    padding: 1rem;
+    border-radius: 4px;
+    height: 250px;
+    overflow-y: auto;
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
+  .log-entry {
+    margin-bottom: 2px;
+  }
+  .log-info {
+    color: #569cd6;
+  }
+  .log-success {
+    color: #4ec9b0;
+  }
+  .log-error {
+    color: #f14c4c;
+  }
+  .log-timestamp {
+    color: #808080;
+    margin-right: 8px;
+  }
+  .preview-card {
+    font-size: 0.85rem;
+  }
+  .preview-label {
+    font-weight: bold;
+    color: #666;
+    width: 120px;
+    display: inline-block;
+  }
+  .debug-container {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    padding: 10px;
+    font-family: monospace;
+    font-size: 0.75rem;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  .btn-xs {
+    padding: 0.1rem 0.4rem;
+    font-size: 0.75rem;
+  }
+</style>
+{% endblock %} {% block content %}
+<div class="container-fluid">
+  <div class="row">
+    <!-- 左側：検索と一覧 -->
+    <div class="col-md-7">
+      <div class="card shadow-sm mb-4">
+        <div
+          class="card-header bg-white d-flex justify-content-between align-items-center"
+        >
+          <h5 class="mb-0"><i class="bi bi-search me-2"></i>書類一覧の取得</h5>
+          <div class="d-flex align-items-center gap-3">
+            <div class="form-check form-switch mb-0">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                id="filterSubstantial"
+                checked
+              />
+              <label class="form-check-label small" for="filterSubstantial"
+                >大量保有のみ</label
+              >
+            </div>
+            <input
+              type="date"
+              id="targetDate"
+              class="form-control form-control-sm"
+              value="{{ today }}"
+              style="width: 150px"
+            />
+            <button id="btnFetchList" class="btn btn-sm btn-primary">
+              一覧取得
+            </button>
+            <button id="btnImportAll" class="btn btn-sm btn-danger d-none">
+              一括取得
+            </button>
+          </div>
+        </div>
+        <div
+          class="table-responsive"
+          style="max-height: 400px; overflow-y: auto"
+        >
+          <table class="table table-hover table-sm align-middle mb-0">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th>時間</th>
+                <th>提出者</th>
+                <th>書類名</th>
+                <th>docID</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="docTableBody">
+              <tr>
+                <td colspan="5" class="text-center py-4 text-muted">
+                  日付を選択して一覧を取得してください
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 解析結果プレビュー領域 -->
+      <div id="previewArea" class="card shadow-sm mb-4 d-none">
+        <div
+          class="card-header bg-success text-white d-flex justify-content-between align-items-center"
+        >
+          <h5 class="mb-0"><i class="bi bi-eye me-2"></i>解析結果プレビュー</h5>
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-light"
+            data-bs-toggle="collapse"
+            data-bs-target="#debugCollapse"
+          >
+            <i class="bi bi-bug me-1"></i>デバッグ情報を開く
+          </button>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-6">
+              <h6 class="border-bottom pb-1 mb-2">Documents (提出情報)</h6>
+              <div class="preview-card p-2 bg-light rounded shadow-sm">
+                <div>
+                  <span class="preview-label">docID:</span>
+                  <span id="p_doc_id" class="fw-bold"></span>
+                </div>
+                <div>
+                  <span class="preview-label">提出者:</span>
+                  <span id="p_submitter"></span>
+                </div>
+                <div>
+                  <span class="preview-label">発行会社:</span>
+                  <span id="p_issuer" class="fw-bold text-dark"></span>
+                </div>
+                <div>
+                  <span class="preview-label">証券コード:</span>
+                  <span id="p_sec_code"></span>
+                </div>
+                <div>
+                  <span class="preview-label">書類種別:</span>
+                  <span id="p_type"></span>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <h6 class="border-bottom pb-1 mb-2">
+                Ownership Reports (実データ)
+              </h6>
+              <div class="preview-card p-2 bg-light rounded shadow-sm">
+                <div>
+                  <span class="preview-label">義務発生日:</span>
+                  <span id="p_ob_date" class="text-primary fw-bold"></span>
+                </div>
+                <div>
+                  <span class="preview-label">保有割合:</span>
+                  <span
+                    id="p_ratio"
+                    class="fw-bold text-success"
+                    style="font-size: 1.1rem"
+                  ></span>
+                </div>
+                <div>
+                  <span class="preview-label">前回割合:</span>
+                  <span id="p_prev_ratio"></span>
+                </div>
+                <div>
+                  <span class="preview-label">最新フラグ:</span>
+                  <span id="p_is_latest"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="row mt-3">
+            <div class="col-12">
+              <h6 class="border-bottom pb-1 mb-2">保有目的 (抽出)</h6>
+              <div
+                id="p_purpose"
+                class="small bg-light p-2 rounded border"
+                style="
+                  max-height: 100px;
+                  overflow-y: auto;
+                  white-space: pre-wrap;
+                "
+              ></div>
+            </div>
+          </div>
+          <div class="row mt-3">
+            <div class="col-12">
+              <h6 class="border-bottom pb-1 mb-2">重要な契約 (抽出)</h6>
+              <div
+                id="p_contracts"
+                class="small bg-light p-2 rounded border"
+                style="
+                  max-height: 100px;
+                  overflow-y: auto;
+                  white-space: pre-wrap;
+                "
+              ></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- デバッグ情報表示領域 (Collapse) -->
+      <div class="collapse" id="debugCollapse">
+        <div id="debugArea" class="card shadow-sm mb-4 border-dark">
+          <div
+            class="card-header bg-dark text-white d-flex justify-content-between align-items-center"
+          >
+            <h5 class="mb-0">
+              <i class="bi bi-bug me-2"></i>取得データの詳細 (デバッグ用)
+            </h5>
+            <button
+              type="button"
+              class="btn-close btn-close-white"
+              data-bs-toggle="collapse"
+              data-bs-target="#debugCollapse"
+            ></button>
+          </div>
+          <div class="card-body">
+            <h6>ZIP内ファイル一覧:</h6>
+            <ul
+              id="debugFileList"
+              class="small text-muted mb-3"
+              style="column-count: 2"
+            ></ul>
+
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <h6>XBRL プレビュー (全文):</h6>
+              <button
+                id="btnCopyXbrl"
+                class="btn btn-xs btn-outline-secondary py-0 px-2"
+              >
+                <i class="bi bi-clipboard me-1"></i>コピー
+              </button>
+            </div>
+            <pre
+              id="debugXbrlSnippet"
+              class="debug-container bg-light p-2 border rounded"
+              style="max-height: 500px; overflow: auto"
+            ></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右側：進捗ログ -->
+    <div class="col-md-5">
+      <div class="card shadow-sm mb-4">
+        <div
+          class="card-header bg-white d-flex justify-content-between align-items-center"
+        >
+          <h5 class="mb-0"><i class="bi bi-terminal me-2"></i>進捗ログ</h5>
+          <button id="btnClearLog" class="btn btn-sm btn-outline-secondary">
+            クリア
+          </button>
+        </div>
+        <div class="card-body">
+          <div id="logContainer" class="log-container">
+            <div class="log-entry text-muted">待機中...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block extra_js %}
+<script>
+  const btnFetchList = document.getElementById("btnFetchList");
+  const btnImportAll = document.getElementById("btnImportAll");
+  const logContainer = document.getElementById("logContainer");
+  const docTableBody = document.getElementById("docTableBody");
+  const targetDateInput = document.getElementById("targetDate");
+  const previewArea = document.getElementById("previewArea");
+  const filterSubstantial = document.getElementById("filterSubstantial");
+  const btnCopyXbrl = document.getElementById("btnCopyXbrl");
+  const debugXbrlSnippet = document.getElementById("debugXbrlSnippet");
+
+  let currentDocuments = [];
+
+  function addLog(message, type = "info") {
+    const entry = document.createElement("div");
+    entry.className = `log-entry log-${type}`;
+    const timestamp = document.createElement("span");
+    timestamp.className = "log-timestamp";
+    timestamp.textContent = new Date().toLocaleTimeString();
+    const content = document.createElement("span");
+    content.textContent = message;
+    entry.appendChild(timestamp);
+    entry.appendChild(content);
+    logContainer.appendChild(entry);
+    logContainer.scrollTop = logContainer.scrollHeight;
+  }
+
+  btnFetchList.addEventListener("click", async () => {
+    const date = targetDateInput.value;
+    if (!date) return;
+    addLog(`${date} の書類一覧を取得中...`, "info");
+    docTableBody.innerHTML =
+      '<tr><td colspan="5" class="text-center py-4"><div class="spinner-border spinner-border-sm text-primary"></div> 取得中...</td></tr>';
+    try {
+      const response = await fetch(
+        `/admin/test_import/list_documents?date=${date}`,
+      );
+      const data = await response.json();
+      if (data.status === "success") {
+        addLog(`取得完了: ${data.count} 件の書類が見つかりました。`, "success");
+        currentDocuments = data.documents;
+        btnImportAll.classList.remove("d-none");
+        renderTable();
+      } else {
+        addLog(`エラー: ${data.message}`, "error");
+        docTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-danger">エラー: ${data.message}</td></tr>`;
+      }
+    } catch (error) {
+      addLog(`通信エラー: ${error.message}`, "error");
+    }
+  });
+
+  btnImportAll.addEventListener("click", async () => {
+    const date = targetDateInput.value;
+    if (
+      !date ||
+      !confirm(`${date} の対象書類をすべてバックグラウンドで取り込みますか？`)
+    )
+      return;
+
+    addLog(`${date} の一括インポートをリクエスト中...`, "info");
+    try {
+      const formData = new FormData();
+      formData.append("date", date);
+      const response = await fetch("/admin/test_import/import_all", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await response.json();
+      if (data.status === "success") {
+        addLog(data.message, "success");
+        addLog("進捗は「日次ステータス」画面で確認できます。", "info");
+      } else {
+        addLog(`エラー: ${data.message}`, "error");
+      }
+    } catch (error) {
+      addLog(`通信エラー: ${error.message}`, "error");
+    }
+  });
+
+  filterSubstantial.addEventListener("change", () => {
+    renderTable();
+  });
+
+  function renderTable() {
+    let filtered = currentDocuments;
+    if (filterSubstantial.checked) {
+      filtered = currentDocuments.filter(
+        (doc) => doc.docDescription && doc.docDescription.includes("大量保有"),
+      );
+    }
+    if (filtered.length === 0) {
+      docTableBody.innerHTML =
+        '<tr><td colspan="5" class="text-center py-4 text-muted">該当する書類はありません</td></tr>';
+      return;
+    }
+    docTableBody.innerHTML = filtered
+      .map((doc) => {
+        const time = doc.submitDateTime
+          ? doc.submitDateTime.split(" ")[1]
+          : "-";
+        const isSubstantial =
+          doc.docDescription && doc.docDescription.includes("大量保有");
+        const rowClass = isSubstantial ? "table-warning" : "";
+        return `
+                <tr class="${rowClass}">
+                    <td>${time}</td>
+                    <td class="text-truncate" style="max-width: 150px;" title="${doc.filerName || ""}">${doc.filerName || "-"}</td>
+                    <td class="small">${doc.docDescription || "-"}</td>
+                    <td><code>${doc.docID}</code></td>
+                    <td>
+                        <button class="btn btn-xs btn-outline-primary py-0 px-1" onclick="importDoc('${doc.docID}')">詳細取得</button>
+                    </td>
+                </tr>
+            `;
+      })
+      .join("");
+  }
+
+  async function importDoc(docId) {
+    const docData = currentDocuments.find((d) => d.docID === docId);
+    if (!docData) {
+      addLog(`エラー: 書類データが見つかりません`, "error");
+      return;
+    }
+
+    addLog(`書類 ${docId} の詳細取得と解析を開始...`, "info");
+    previewArea.classList.add("d-none");
+    const collapseEl = document.getElementById("debugCollapse");
+    const bsCollapse = bootstrap.Collapse.getInstance(collapseEl);
+    if (bsCollapse) bsCollapse.hide();
+
+    try {
+      const response = await fetch(
+        `/admin/test_import/import_document/${docId}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(docData),
+        },
+      );
+      const data = await response.json();
+      if (data.status === "success") {
+        for (const step of data.steps) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          addLog(step, step.includes("完了") ? "success" : "info");
+        }
+        showResults(data.debug, data.preview);
+      } else {
+        addLog(`エラー: ${data.message}`, "error");
+      }
+    } catch (error) {
+      addLog(`通信エラー: ${error.message}`, "error");
+    }
+  }
+
+  function showResults(debug, preview) {
+    document.getElementById("p_doc_id").textContent = preview.document.doc_id;
+    document.getElementById("p_submitter").textContent =
+      preview.document.submitter_name;
+    document.getElementById("p_issuer").textContent =
+      preview.document.issuer_name;
+    document.getElementById("p_sec_code").textContent =
+      preview.document.sec_code;
+    document.getElementById("p_type").textContent =
+      preview.document.doc_description;
+
+    document.getElementById("p_ob_date").textContent =
+      preview.report.obligation_date;
+    document.getElementById("p_ratio").textContent =
+      `${preview.report.holding_ratio}%`;
+    document.getElementById("p_prev_ratio").textContent =
+      `${preview.report.prev_holding_ratio}%`;
+    document.getElementById("p_is_latest").textContent = preview.report
+      .is_latest
+      ? "はい"
+      : "いいえ";
+    document.getElementById("p_purpose").textContent =
+      preview.report.holding_purpose;
+    document.getElementById("p_contracts").textContent =
+      preview.report.important_contracts || "特になし";
+
+    const fileList = document.getElementById("debugFileList");
+    fileList.innerHTML = debug.files.map((f) => `<li>${f}</li>`).join("");
+    debugXbrlSnippet.textContent =
+      debug.xbrl_content_snippet || "(XBRLファイルなし)";
+
+    previewArea.classList.remove("d-none");
+    previewArea.scrollIntoView({ behavior: "smooth" });
+  }
+
+  btnCopyXbrl.addEventListener("click", () => {
+    const text = debugXbrlSnippet.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      const originalText = btnCopyXbrl.innerHTML;
+      btnCopyXbrl.innerHTML = '<i class="bi bi-check2 me-1"></i>コピーしました';
+      btnCopyXbrl.classList.replace("btn-outline-secondary", "btn-success");
+      setTimeout(() => {
+        btnCopyXbrl.innerHTML = originalText;
+        btnCopyXbrl.classList.replace("btn-success", "btn-outline-secondary");
+      }, 2000);
+    });
+  });
+
+  document.getElementById("btnClearLog").addEventListener("click", () => {
+    logContainer.innerHTML =
+      '<div class="log-entry text-muted">待機中...</div>';
+  });
+</script>
+{% endblock %}

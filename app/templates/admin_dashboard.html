@@ -1,0 +1,299 @@
+{% extends "base.html" %} {% block title %}管理者ダッシュボード - Stock Whale
+Radar{% endblock %} {% block header %}インポート状況管理{% endblock %} {% block
+extra_css %}
+<style>
+  .cal-box {
+    width: 30px;
+    height: 30px;
+    border-radius: 4px;
+    display: inline-block;
+    text-align: center;
+    line-height: 30px;
+    color: white;
+    font-weight: bold;
+    font-size: 0.75rem;
+  }
+  .bg-completed {
+    background-color: #198754;
+  } /* 🟩 */
+  .bg-failed {
+    background-color: #dc3545;
+  } /* 🟥 */
+  .bg-processing {
+    background-color: #ffc107;
+    color: black;
+  } /* 🟨 */
+  .bg-pending {
+    background-color: #e9ecef;
+    color: #6c757d;
+  } /* ⬜️ */
+</style>
+{% endblock %} {% block content %}
+<div class="container-fluid">
+  <!-- ▼ 手動インポート実行 -->
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-white">
+      <h5 class="mb-0">
+        <i class="bi bi-cloud-arrow-down me-2"></i>手動インポート実行 (期間指定)
+      </h5>
+    </div>
+    <div class="card-body">
+      <form
+        id="manualImportForm"
+        class="row g-3 align-items-end"
+        onsubmit="return false;"
+      >
+        <div class="col-auto">
+          <label class="form-label">開始日</label>
+          <input
+            type="date"
+            class="form-control"
+            name="start_date"
+            required
+            value="{{ (now - timedelta(days=7)).strftime('%Y-%m-%d') }}"
+          />
+        </div>
+        <div class="col-auto text-center pb-2">
+          <span>〜</span>
+        </div>
+        <div class="col-auto">
+          <label class="form-label">終了日</label>
+          <input
+            type="date"
+            class="form-control"
+            name="end_date"
+            required
+            value="{{ now.strftime('%Y-%m-%d') }}"
+          />
+        </div>
+        <div class="col-auto">
+          <div class="form-check mb-2">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              name="include_completed"
+              id="includeCompleted"
+            />
+            <label class="form-check-label small" for="includeCompleted">
+              completedも含む
+            </label>
+          </div>
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-rocket-takeoff me-1"></i>
+            指定期間のインポートを開始する
+          </button>
+        </div>
+      </form>
+      <div class="form-text mt-2 text-muted">
+        ※デフォルトでは未実施(pending) または
+        エラー(failed)の日付のみを対象に実行します。
+      </div>
+    </div>
+  </div>
+
+  <!-- ▼ 月間ステータスカレンダー -->
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-white">
+      <h5 class="mb-0">
+        <i class="bi bi-calendar3 me-2"></i>月間ステータス ({{ current_month }})
+      </h5>
+    </div>
+    <div class="card-body text-center">
+      <div class="d-flex justify-content-center gap-1 mb-2 flex-wrap">
+        {% for day_info in days_in_month %}
+        <div
+          class="cal-box bg-{{ day_info.status }}"
+          title="{{ day_info.date }} ({{ day_info.status }})"
+        >
+          {{ day_info.day }}
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="mt-3 small">
+        凡例:
+        <span class="badge bg-success mx-1">完了 (completed)</span>
+        <span class="badge bg-danger mx-1">エラー (failed)</span>
+        <span class="badge bg-warning text-dark mx-1">処理中 (processing)</span>
+        <span class="badge bg-secondary mx-1">未実施 (pending)</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ▼ 直近の取り込み詳細リスト -->
+  <div class="card shadow-sm mb-5">
+    <div
+      class="card-header bg-white d-flex justify-content-between align-items-center"
+    >
+      <h5 class="mb-0">
+        <i class="bi bi-list-task me-2"></i>直近の取り込み詳細 (最新30件)
+      </h5>
+      <a
+        href="/admin/import_daily_status/"
+        class="btn btn-sm btn-outline-secondary"
+        ><i class="bi bi-arrow-clockwise"></i> 更新</a
+      >
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>対象日</th>
+            <th>ステータス</th>
+            <th>大量保有 (保存/対象)</th>
+            <th>最終実行日時</th>
+            <th>所要時間</th>
+            <th>アクション</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in recent_logs %}
+          <tr>
+            <td class="fw-bold">{{ row.target_date }}</td>
+            <td>
+              {% if row.status == 'completed' %}
+              <span class="badge bg-success">完了</span>
+              {% elif row.status == 'failed' %}
+              <span class="badge bg-danger">エラー</span>
+              {% if row.error_message %}
+              <i
+                class="bi bi-info-circle ms-1"
+                title="{{ row.error_message }}"
+              ></i>
+              {% endif %} {% elif row.status == 'processing' %}
+              <span class="badge bg-warning text-dark">
+                <span
+                  class="spinner-border spinner-border-sm me-1"
+                  role="status"
+                  aria-hidden="true"
+                ></span>
+                処理中
+              </span>
+              {% else %}
+              <span class="badge bg-secondary">未実施</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.status != 'pending' %} {{ row.success_count }}件 / {{
+              row.target_docs_count }}件 {% else %} - {% endif %}
+            </td>
+            <td>
+              {% if row.last_run_start_at %} {{
+              row.last_run_start_at.strftime('%Y-%m-%d %H:%M:%S') }} {% else %}
+              - {% endif %}
+            </td>
+            <td>
+              {% if row.status == 'processing' %}
+              <span class="text-warning fw-bold">処理中...</span>
+              {% elif row.last_run_start_at and row.last_run_end_at %} {% set
+              duration = (row.last_run_end_at -
+              row.last_run_start_at).total_seconds() | int %} {{ duration // 60
+              }}分 {{ duration % 60 }}秒 {% else %} - {% endif %}
+            </td>
+            <td>
+              {% if row.status == 'processing' %}
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-danger"
+                disabled
+              >
+                処理中
+              </button>
+              {% else %}
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-primary"
+                onclick="retryImport('{{ row.target_date }}')"
+              >
+                再取得
+              </button>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="5" class="text-center text-muted py-4">
+              データがありません。期間を指定してインポートを開始してください。
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block extra_js %}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    // ツールチップの有効化
+    var tooltipTriggerList = [].slice.call(
+      document.querySelectorAll("[title]"),
+    );
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+      return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+
+    window.retryImport = async function (date) {
+      if (
+        !confirm(`${date} の対象書類をすべてバックグラウンドで取り込みますか？`)
+      )
+        return;
+
+      try {
+        const formData = new FormData();
+        formData.append("date", date);
+        const response = await fetch("/admin/test_import/import_all", {
+          method: "POST",
+          body: formData,
+        });
+        const data = await response.json();
+        if (data.status === "success") {
+          alert(data.message + "\n進捗はページを更新して確認してください。");
+          location.reload();
+        } else {
+          alert(`エラー: ${data.message}`);
+        }
+      } catch (error) {
+        alert(`通信エラー: ${error.message}`);
+      }
+    };
+
+    // 手動インポートフォームの非同期化
+    const manualImportForm = document.getElementById("manualImportForm");
+    if (manualImportForm) {
+      manualImportForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const formData = new FormData(manualImportForm);
+        const startDate = formData.get("start_date");
+        const endDate = formData.get("end_date");
+        const includeCompleted = formData.get("include_completed") === "on";
+
+        if (
+          !confirm(
+            `${startDate} から ${endDate} のインポートを開始しますか？\n（対象: ${
+              includeCompleted ? "すべて" : "未実施またはエラーのみ"
+            }）`,
+          )
+        )
+          return;
+
+        try {
+          const response = await fetch("/admin/import_daily_status/import", {
+            method: "POST",
+            body: formData,
+          });
+          const data = await response.json();
+          if (data.status === "success") {
+            alert(data.message + "\n進捗はページを更新して確認してください。");
+            location.reload();
+          } else {
+            alert(`エラー: ${data.message}`);
+          }
+        } catch (error) {
+          alert(`通信エラー: ${error.message}`);
+        }
+      });
+    }
+  });
+</script>
+{% endblock %}
