@@ -147,6 +147,7 @@ class SystemEvent(Base):
     event_level = Column(String, nullable=False) # 'INFO', 'WARN', 'ERROR', 'FATAL'
     event_category = Column(String, nullable=False) # 'batch_sync', 'xbrl_parse', 'api_fetch', 'system'
     doc_id = Column(String, nullable=True)
+    job_id = Column(String, nullable=True)
     message = Column(String, nullable=False)
     error_details = Column(String, nullable=True) # JSON or Stacktrace
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -1,0 +1,584 @@
+{% extends "base.html" %} {% block title %}ジョブ進捗状況 - Stock Whale Radar{%
+endblock %} {% block header %}ジョブ進捗状況{% endblock %} {% block extra_css %}
+<style>
+  .log-entry {
+    font-family: "Courier New", monospace;
+    font-size: 0.85rem;
+    border-left: 3px solid;
+    padding-left: 10px;
+    margin-bottom: 8px;
+  }
+  .log-entry.error {
+    border-color: #dc3545;
+    background-color: #fff5f5;
+  }
+  .log-entry.warn {
+    border-color: #ffc107;
+    background-color: #fffef5;
+  }
+  .log-time {
+    color: #6c757d;
+    font-size: 0.75rem;
+  }
+  .stats-card {
+    background-color: #f8f9fa;
+  }
+  .stats-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+  }
+  .stats-label {
+    font-size: 0.85rem;
+    color: #6c757d;
+  }
+  .job-id-display {
+    word-break: break-all;
+    font-size: 0.85rem;
+  }
+  /* 日別進捗表示 */
+  .daily-progress-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-bottom: 8px;
+  }
+  .daily-progress-item {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+  .daily-progress-item.pending {
+    background-color: #e9ecef;
+    color: #6c757d;
+  }
+  .daily-progress-item.processing {
+    background-color: #fff3cd;
+    color: #856404;
+  }
+  .daily-progress-item.completed {
+    background-color: #d4edda;
+    color: #155724;
+  }
+  .daily-progress-item.failed {
+    background-color: #f8d7da;
+    color: #721c24;
+  }
+  .daily-progress-date {
+    font-weight: bold;
+    margin-right: 6px;
+  }
+  .daily-progress-status {
+    font-size: 0.75rem;
+  }
+  .daily-progress-detail {
+    font-size: 0.7rem;
+    opacity: 0.8;
+    margin-left: 4px;
+  }
+</style>
+{% endblock %} {% block content %}
+<div class="container-fluid">
+  <!-- ジョブ ID 入力エリア -->
+  <div class="card mb-4 shadow-sm">
+    <div class="card-header bg-white">
+      <h5 class="mb-0">
+        <i class="bi bi-search me-2"></i>ジョブ ID で進捗を確認
+      </h5>
+    </div>
+    <div class="card-body">
+      <form id="jobIdForm" class="row g-3 align-items-end">
+        <div class="col-md-8">
+          <label class="form-label">ジョブ ID</label>
+          <input
+            type="text"
+            class="form-control"
+            id="jobIdInput"
+            placeholder="例：batch_20260425_123456"
+            value="{{ job_id | default('') }}"
+          />
+        </div>
+        <div class="col-md-4">
+          <button type="submit" class="btn btn-primary w-100">
+            <i class="bi bi-play-circle me-1"></i>進捗を表示
+          </button>
+        </div>
+      </form>
+      <div class="form-text mt-2">
+        <i class="bi bi-info-circle"></i>
+        ジョブ ID
+        はインポート実行時に返却されます。ダッシュボードからインポートを開始した場合、自動的にこの画面に遷移します。
+      </div>
+    </div>
+  </div>
+
+  <!-- 進捗表示パネル -->
+  <div id="progressPanel" class="card mb-4 shadow-sm" style="display: none">
+    <div
+      class="card-header bg-primary text-white d-flex justify-content-between align-items-center"
+    >
+      <h5 class="mb-0">
+        <i class="bi bi-speedometer2 me-2"></i>
+        実行中ジョブの進捗
+        <span id="progressStatusBadge" class="badge bg-light text-primary ms-2"
+          >処理中...</span
+        >
+      </h5>
+      <div>
+        <button
+          type="button"
+          class="btn btn-sm btn-light me-2"
+          onclick="stopPolling()"
+        >
+          <i class="bi bi-pause-circle"></i> 停止
+        </button>
+        <button
+          type="button"
+          class="btn btn-sm btn-light"
+          onclick="fetchProgress(currentJobId)"
+        >
+          <i class="bi bi-arrow-clockwise"></i> 更新
+        </button>
+      </div>
+    </div>
+    <div class="card-body">
+      <!-- 日別進捗表示パネル -->
+      <div class="mb-4">
+        <h6 class="border-bottom pb-2 mb-2">
+          <i class="bi bi-calendar-check me-1"></i>日別進捗状況
+        </h6>
+        <div id="dailyProgressList" class="daily-progress-container">
+          <!-- JavaScript で動的に生成 -->
+          <p class="text-muted small">データなし</p>
+        </div>
+      </div>
+
+      <!-- 進捗バー -->
+      <div class="mb-4">
+        <div class="d-flex justify-content-between mb-1">
+          <span id="progressPercentText">0%</span>
+          <span id="progressEstimatedTime"></span>
+        </div>
+        <div class="progress" style="height: 25px">
+          <div
+            id="progressBar"
+            class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+            role="progressbar"
+            style="width: 0%"
+          >
+            <span id="progressBarText"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 統計情報 -->
+      <div class="row mb-4">
+        <div class="col-md-3 col-6 mb-3">
+          <div class="stats-card p-3 rounded text-center">
+            <div class="stats-value text-primary" id="statTotalTasks">0</div>
+            <div class="stats-label">総タスク数</div>
+          </div>
+        </div>
+        <div class="col-md-3 col-6 mb-3">
+          <div class="stats-card p-3 rounded text-center">
+            <div class="stats-value text-success" id="statCompletedTasks">
+              0
+            </div>
+            <div class="stats-label">完了</div>
+          </div>
+        </div>
+        <div class="col-md-3 col-6 mb-3">
+          <div class="stats-card p-3 rounded text-center">
+            <div class="stats-value text-warning" id="statProcessingTasks">
+              0
+            </div>
+            <div class="stats-label">処理中</div>
+          </div>
+        </div>
+        <div class="col-md-3 col-6 mb-3">
+          <div class="stats-card p-3 rounded text-center">
+            <div class="stats-value text-danger" id="statFailedTasks">0</div>
+            <div class="stats-label">エラー</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ジョブ詳細 -->
+      <div class="row mb-4">
+        <div class="col-md-6">
+          <h6 class="border-bottom pb-2">ジョブ情報</h6>
+          <table class="table table-sm table-borderless mb-0">
+            <tr>
+              <td class="text-muted">ジョブ ID:</td>
+              <td><code id="jobId" class="job-id-display">-</code></td>
+            </tr>
+            <tr>
+              <td class="text-muted">開始日時:</td>
+              <td id="jobStartedAt">-</td>
+            </tr>
+            <tr>
+              <td class="text-muted">終了日時:</td>
+              <td id="jobFinishedAt">-</td>
+            </tr>
+            <tr>
+              <td class="text-muted">対象書類数:</td>
+              <td id="jobTargetDocs">-</td>
+            </tr>
+            <tr>
+              <td class="text-muted">成功数:</td>
+              <td id="jobSuccessCount">-</td>
+            </tr>
+            <tr>
+              <td class="text-muted">エラー数:</td>
+              <td id="jobErrorCount">-</td>
+            </tr>
+          </table>
+        </div>
+        <div class="col-md-6">
+          <h6 class="border-bottom pb-2">日別ステータス</h6>
+          <div id="dailyStatusList" style="max-height: 150px; overflow-y: auto">
+            <!-- JavaScript で動的に生成 -->
+          </div>
+        </div>
+      </div>
+
+      <!-- リアルタイムエラーログ -->
+      <div>
+        <h6 class="border-bottom pb-2">
+          <i class="bi bi-bug-fill text-danger"></i> 最新エラーログ
+          <span class="badge bg-secondary ms-2" id="errorLogCount">0</span>
+        </h6>
+        <div id="errorLogList" style="max-height: 200px; overflow-y: auto">
+          <p class="text-muted small">エラーログはありません</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block extra_js %}
+<script>
+  // リアルタイム進捗ポーリング用変数
+  let pollingInterval = null;
+  let currentJobId = null;
+
+  document.addEventListener("DOMContentLoaded", function () {
+    // ツールチップの有効化
+    var tooltipTriggerList = [].slice.call(
+      document.querySelectorAll("[title]"),
+    );
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+      return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+
+    // ジョブ ID フォームの送信処理
+    document
+      .getElementById("jobIdForm")
+      .addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const jobId = document.getElementById("jobIdInput").value.trim();
+        if (jobId) {
+          startPolling(jobId);
+        }
+      });
+
+    // ポーリング開始関数
+    window.startPolling = function (jobId) {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+      currentJobId = jobId;
+      document.getElementById("progressPanel").style.display = "block";
+      document.getElementById("jobIdInput").value = jobId;
+
+      // 即時更新
+      fetchProgress(jobId);
+
+      // 10 秒ごとに更新
+      pollingInterval = setInterval(() => fetchProgress(jobId), 10000);
+    };
+
+    // ポーリング停止関数
+    window.stopPolling = function () {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+        pollingInterval = null;
+      }
+      currentJobId = null;
+    };
+
+    // 進捗取得関数
+    async function fetchProgress(jobId) {
+      try {
+        const response = await fetch(
+          `/admin/import_daily_status/progress/${jobId}`,
+        );
+        if (response.status === 404) {
+          // ジョブが完了または存在しない
+          alert("ジョブが見つかりません、または完了しています。");
+          stopPolling();
+          document.getElementById("progressPanel").style.display = "none";
+          return;
+        }
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error("HTTP error:", response.status, errorText);
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+        const data = await response.json();
+        console.log("Fetched progress data:", data);
+        updateProgressPanel(data);
+      } catch (error) {
+        console.error("進捗取得エラー:", error);
+        alert("進捗情報の取得に失敗しました。");
+      }
+    }
+
+    // 進捗パネル更新関数
+    function updateProgressPanel(data) {
+      console.log("Received data:", data);
+
+      if (!data || !data.progress) {
+        console.error("Invalid data structure:", data);
+        alert("進捗情報の形式が正しくありません。");
+        return;
+      }
+
+      const {
+        progress,
+        job_stats,
+        daily_statuses,
+        target_date_range,
+        estimated_remaining_seconds,
+        recent_errors,
+        status,
+        started_at,
+        finished_at,
+      } = data;
+
+      const jobStartedTime = started_at ? new Date(started_at).getTime() : 0;
+
+      // 進捗バー更新
+      const percent = progress.percent || 0;
+      document.getElementById("progressPercentText").textContent =
+        `${percent}%`;
+      document.getElementById("progressBar").style.width = `${percent}%`;
+      document.getElementById("progressBarText").textContent =
+        percent > 5 ? `${percent}%` : "";
+
+      // 推定残り時間
+      const timeEl = document.getElementById("progressEstimatedTime");
+      if (estimated_remaining_seconds) {
+        const mins = Math.floor(estimated_remaining_seconds / 60);
+        const secs = estimated_remaining_seconds % 60;
+        timeEl.textContent = `残り約 ${mins}分 ${secs}秒`;
+      } else {
+        timeEl.textContent = "";
+      }
+
+      // ステータスバッジ
+      const statusBadge = document.getElementById("progressStatusBadge");
+      if (status === "success") {
+        statusBadge.className = "badge bg-success";
+        statusBadge.textContent = "完了";
+      } else if (status === "failed") {
+        statusBadge.className = "badge bg-danger";
+        statusBadge.textContent = "エラー";
+      } else {
+        statusBadge.className = "badge bg-warning text-dark";
+        statusBadge.textContent = "処理中...";
+      }
+
+      // 統計情報更新
+      document.getElementById("statTotalTasks").textContent =
+        progress.total_tasks;
+      document.getElementById("statCompletedTasks").textContent =
+        progress.completed_tasks;
+      document.getElementById("statProcessingTasks").textContent =
+        progress.processing_tasks;
+      document.getElementById("statFailedTasks").textContent =
+        progress.failed_tasks;
+
+      // ジョブ情報更新
+      document.getElementById("jobId").textContent = data.job_id;
+      if (started_at) {
+        document.getElementById("jobStartedAt").textContent = new Date(
+          started_at,
+        ).toLocaleString("ja-JP");
+      }
+      if (finished_at) {
+        document.getElementById("jobFinishedAt").textContent = new Date(
+          finished_at,
+        ).toLocaleString("ja-JP");
+      } else {
+        document.getElementById("jobFinishedAt").textContent = "-";
+      }
+      document.getElementById("jobTargetDocs").textContent =
+        job_stats.target_docs_count;
+      document.getElementById("jobSuccessCount").textContent =
+        job_stats.success_count;
+      document.getElementById("jobErrorCount").textContent =
+        job_stats.error_count;
+
+      // 日別進捗表示更新
+      const dailyProgressList = document.getElementById("dailyProgressList");
+
+      // target_date_range から daily_statuses にない日付も追加
+      let allDates = [];
+      if (target_date_range && target_date_range.length > 0) {
+        const statusMap = {};
+        if (daily_statuses) {
+          daily_statuses.forEach((ds) => {
+            statusMap[ds.target_date] = ds;
+          });
+        }
+        // target_date_range の全日付を statusMap で拡張
+        allDates = target_date_range.map(
+          (date) =>
+            statusMap[date] || {
+              target_date: date,
+              status: "pending",
+              success_count: 0,
+              target_docs_count: 0,
+              duration_seconds: null,
+              error_message: null,
+            },
+        );
+      } else if (daily_statuses && daily_statuses.length > 0) {
+        allDates = daily_statuses;
+      }
+
+      if (allDates.length > 0) {
+        dailyProgressList.innerHTML = allDates
+          .map((ds) => {
+            let statusClass = "pending";
+            let statusText = "未実施";
+            let detailText = "";
+
+            if (ds.status === "completed") {
+              statusClass = "completed";
+              // 今回のジョブ開始より前に実行開始されていた場合は「作業済」
+              const lastRunTime = ds.last_run_start_at
+                ? new Date(ds.last_run_start_at).getTime()
+                : 0;
+              const isAlreadyDone = lastRunTime < jobStartedTime;
+              statusText = isAlreadyDone ? "作業済" : "完了";
+
+              detailText = `${ds.success_count || 0}件`;
+              if (ds.duration_seconds != null) {
+                const mins = Math.floor(ds.duration_seconds / 60);
+                const secs = ds.duration_seconds % 60;
+                detailText += ` (${mins}分${secs}秒)`;
+              }
+            } else if (ds.status === "failed") {
+              statusClass = "failed";
+              statusText = "エラー";
+              detailText = ds.error_message || "エラー発生";
+            } else if (ds.status === "processing") {
+              statusClass = "processing";
+              statusText = "処理中";
+              const current = ds.success_count || 0;
+              const total = ds.target_docs_count || 0;
+              detailText = `${current}/${total}`;
+            }
+
+            return `
+                      <div class="daily-progress-item ${statusClass}">
+                          <span class="daily-progress-date">${ds.target_date}</span>
+                          <span class="daily-progress-status">
+                              <strong>${statusText}</strong>
+                              ${detailText ? `<span class="daily-progress-detail">・${detailText}</span>` : ""}
+                          </span>
+                      </div>
+                  `;
+          })
+          .join("");
+      } else {
+        dailyProgressList.innerHTML =
+          '<p class="text-muted small">データなし</p>';
+      }
+
+      // 旧スタイルの日別ステータスリストも更新（ジョブ情報内のもの）
+      const dailyStatusList = document.getElementById("dailyStatusList");
+      if (daily_statuses && daily_statuses.length > 0) {
+        dailyStatusList.innerHTML = daily_statuses
+          .map((ds) => {
+            let statusClass = "bg-secondary";
+            let statusText = "未実施";
+            if (ds.status === "completed") {
+              statusClass = "bg-success";
+
+              // 今回のジョブ開始より前に実行開始されていた場合は「作業済」
+              const lastRunTime = ds.last_run_start_at
+                ? new Date(ds.last_run_start_at).getTime()
+                : 0;
+              const isAlreadyDone = lastRunTime < jobStartedTime;
+              statusText = isAlreadyDone ? "作業済" : "完了";
+            } else if (ds.status === "failed") {
+              statusClass = "bg-danger";
+              statusText = "エラー";
+            } else if (ds.status === "processing") {
+              statusClass = "bg-warning";
+              statusText = "処理中";
+            }
+            return `
+              <div class="d-flex justify-content-between align-items-center mb-2 p-2 ${statusClass} text-white rounded">
+                <span>${ds.target_date}</span>
+                <span class="badge bg-white text-dark">${statusText}</span>
+              </div>
+            `;
+          })
+          .join("");
+      } else {
+        dailyStatusList.innerHTML =
+          '<p class="text-muted small">データなし</p>';
+      }
+
+      // エラーログ更新
+      const errorLogList = document.getElementById("errorLogList");
+      const errorLogCount = document.getElementById("errorLogCount");
+      if (recent_errors && recent_errors.length > 0) {
+        errorLogCount.textContent = recent_errors.length;
+        errorLogList.innerHTML = recent_errors
+          .map((log) => {
+            const logClass =
+              log.level === "FATAL"
+                ? "error"
+                : log.level === "ERROR"
+                  ? "error"
+                  : "warn";
+            const timeStr = log.created_at
+              ? new Date(log.created_at).toLocaleTimeString("ja-JP")
+              : "";
+            return `
+            <div class="log-entry ${logClass}">
+              <div class="log-time">${timeStr}</div>
+              <div><strong>[${log.level}]</strong> ${log.message}</div>
+              ${log.doc_id ? `<div class="text-muted small">doc_id: ${log.doc_id}</div>` : ""}
+            </div>
+          `;
+          })
+          .join("");
+      } else {
+        errorLogCount.textContent = "0";
+        errorLogList.innerHTML =
+          '<p class="text-muted small">エラーログはありません</p>';
+      }
+
+      // ジョブ完了またはエラーの場合、ポーリングを停止
+      if (status === "success" || status === "failed") {
+        setTimeout(() => stopPolling(), 5000);
+      }
+    }
+
+    // URL パラメータから job_id を取得して自動開始
+    const urlParams = new URLSearchParams(window.location.search);
+    const jobIdFromUrl = urlParams.get("job_id");
+    if (jobIdFromUrl) {
+      startPolling(jobIdFromUrl);
+    }
+  });
+</script>
+{% endblock %}

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, BackgroundTasks, Depends, Form, HTTPExce
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from datetime import datetime, timedelta
 import logging
 import os
@@ -65,12 +66,13 @@ async def verify_admin(
     return current_user
 
 # --- 内部用ヘルパー：システムイベントの記録 ---
-def log_system_event(db: Session, level: str, category: str, message: str, doc_id: str = None, error_details: str = None):
+def log_system_event(db: Session, level: str, category: str, message: str, doc_id: str = None, job_id: str = None, error_details: str = None):
     try:
         event = models.SystemEvent(
             event_level=level,
             event_category=category,
             doc_id=doc_id,
+            job_id=job_id,
             message=message,
             error_details=error_details
         )
@@ -78,6 +80,34 @@ def log_system_event(db: Session, level: str, category: str, message: str, doc_i
         db.commit()
     except Exception as e:
         logger.error(f"Failed to log system event: {e}")
+
+
+def parse_date_range_from_message(message: str):
+    """
+    メッセージから日付範囲を解析する
+    例： "Batch sync started: 2026-04-10 to 2026-04-11"
+    戻り値： (start_date_str, end_date_str) または (None, None)
+    """
+    import re
+    match = re.search(r"Batch sync started: (\d{4}-\d{2}-\d{2}) to (\d{4}-\d{2}-\d{2})", message)
+    if match:
+        return match.group(1), match.group(2)
+    return None, None
+
+
+def generate_date_range(start_date: str, end_date: str):
+    """
+    開始日と終了日の間の全日付を生成する
+    戻り値： ["2026-04-10", "2026-04-11", ...]
+    """
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d")
+    delta = end - start
+    dates = []
+    for i in range(delta.days + 1):
+        target_date_obj = start + timedelta(days=i)
+        dates.append(target_date_obj.strftime("%Y-%m-%d"))
+    return dates
 
 # --- 内部用：単一書類の取得と登録 ---
 async def process_single_document(db: Session, doc_id: str, metadata: dict, job_id: str = None):
@@ -107,7 +137,7 @@ async def process_single_document(db: Session, doc_id: str, metadata: dict, job_
                 logger.error(error_msg)
                 task.status = 'failed'
                 db.commit()
-                log_system_event(db, "ERROR", "api_fetch", error_msg, doc_id=doc_id)
+                log_system_event(db, "ERROR", "api_fetch", error_msg, doc_id=doc_id, job_id=job_id)
                 return False
             
             content_type = response.headers.get("Content-Type", "")
@@ -116,7 +146,7 @@ async def process_single_document(db: Session, doc_id: str, metadata: dict, job_
                 logger.error(f"API Error for {doc_id}: {error_data}")
                 task.status = 'failed'
                 db.commit()
-                log_system_event(db, "ERROR", "api_fetch", f"API Error: {error_data}", doc_id=doc_id)
+                log_system_event(db, "ERROR", "api_fetch", f"API Error: {error_data}", doc_id=doc_id, job_id=job_id)
                 return False
             
             if "application/octet-stream" in content_type or "zip" in content_type:
@@ -139,16 +169,18 @@ async def process_single_document(db: Session, doc_id: str, metadata: dict, job_
         logger.error(f"Error processing document {doc_id}: {e}")
         task.status = 'failed'
         db.commit()
-        log_system_event(db, "ERROR", "xbrl_parse", str(e), doc_id=doc_id, error_details=traceback.format_exc())
+        log_system_event(db, "ERROR", "xbrl_parse", str(e), doc_id=doc_id, job_id=job_id, error_details=traceback.format_exc())
         return False
 
 # --- 裏で回す取り込み処理 ---
-async def background_import_task(start_date: str, end_date: str, db_session_factory, include_completed: bool = False):
+async def background_import_task(start_date: str, end_date: str, db_session_factory, include_completed: bool = False, job_id: str = None):
     """
     指定期間のインポートを実行するバックグラウンドタスク
+    job_id が指定されていない場合、自動的に生成されます
     """
     db = db_session_factory()
-    job_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    if not job_id:
+        job_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     
     # SyncJob の作成
     job = models.SyncJob(
@@ -160,64 +192,103 @@ async def background_import_task(start_date: str, end_date: str, db_session_fact
     db.add(job)
     db.commit()
 
-    log_system_event(db, "INFO", "batch_sync", f"Batch sync started: {start_date} to {end_date}")
-
+    log_system_event(db, "INFO", "batch_sync", f"Batch sync started: {start_date} to {end_date}", job_id=job_id)
+    
     try:
         # 日付リストの生成
         start = datetime.strptime(start_date, "%Y-%m-%d")
         end = datetime.strptime(end_date, "%Y-%m-%d")
         delta = end - start
-        
+    
+        # 全日分の target_docs_count を事前に計算して SyncJob に設定
+        total_target_docs = 0
         for i in range(delta.days + 1):
             target_date_obj = start + timedelta(days=i)
             target_date_str = target_date_obj.strftime("%Y-%m-%d")
-            
-            # ステータス行の取得・作成
+    
+            # ステータス行の取得
             status_row = db.query(models.ImportDailyStatus).filter(
                 models.ImportDailyStatus.target_date == target_date_str
             ).first()
-            
+    
             # すでに完了している場合のスキップ処理
             if not include_completed and status_row and status_row.status == 'completed':
                 logger.info(f"Skip {target_date_str} as it is already completed")
                 continue
-
+    
             if not status_row:
                 status_row = models.ImportDailyStatus(target_date=target_date_str)
                 db.add(status_row)
-            
+                db.commit()
+    
+            # 書類一覧の取得（対象数だけ事前に取得）
+            list_url = "https://api.edinet-fsa.go.jp/api/v2/documents.json"
+            params = {"date": target_date_str, "type": 2, "Subscription-Key": EDINET_API_KEY}
+    
+            async with httpx.AsyncClient() as client:
+                headers = {"User-Agent": "Mozilla/5.0"}
+                list_res = await client.get(list_url, params=params, headers=headers, timeout=30.0)
+                if list_res.status_code == 200:
+                    list_data = list_res.json()
+                    all_docs = list_data.get("results", [])
+                    target_docs = [
+                        d for d in all_docs
+                        if d.get("ordinanceCode") == "060" or
+                        (d.get("docDescription") and "大量保有" in d.get("docDescription"))
+                    ]
+                    total_target_docs += len(target_docs)
+    
+        # SyncJob の target_docs_count に合計を設定
+        job.target_docs_count = total_target_docs
+        db.commit()
+    
+        # 実際のインポート処理（1 ループ）
+        for i in range(delta.days + 1):
+            target_date_obj = start + timedelta(days=i)
+            target_date_str = target_date_obj.strftime("%Y-%m-%d")
+    
+            # ステータス行の取得・作成
+            status_row = db.query(models.ImportDailyStatus).filter(
+                models.ImportDailyStatus.target_date == target_date_str
+            ).first()
+    
+            # すでに完了している場合のスキップ処理
+            if not include_completed and status_row and status_row.status == 'completed':
+                logger.info(f"Skip {target_date_str} as it is already completed")
+                continue
+    
+            if not status_row:
+                status_row = models.ImportDailyStatus(target_date=target_date_str)
+                db.add(status_row)
+    
             status_row.status = 'processing'
             status_row.last_run_start_at = datetime.now()
             db.commit()
-            
+    
             try:
-                # 1. 書類一覧の取得
+                # 書類一覧の取得（既に取得済みのため、ここで再取得）
                 list_url = "https://api.edinet-fsa.go.jp/api/v2/documents.json"
                 params = {"date": target_date_str, "type": 2, "Subscription-Key": EDINET_API_KEY}
-                
+    
                 async with httpx.AsyncClient() as client:
                     headers = {"User-Agent": "Mozilla/5.0"}
                     list_res = await client.get(list_url, params=params, headers=headers, timeout=30.0)
                     if list_res.status_code != 200:
                         raise Exception(f"List API Error: {list_res.status_code}")
-                    
+    
                     list_data = list_res.json()
                     all_docs = list_data.get("results", [])
-                    
-                    # 2. フィルタリング (大量保有報告書等)
+    
+                    # フィルタリング (大量保有報告書等)
                     target_docs = [
-                        d for d in all_docs 
-                        if d.get("ordinanceCode") == "060" or 
+                        d for d in all_docs
+                        if d.get("ordinanceCode") == "060" or
                         (d.get("docDescription") and "大量保有" in d.get("docDescription"))
                     ]
-                    
+    
                     status_row.total_docs_count = len(all_docs)
                     status_row.target_docs_count = len(target_docs)
                     status_row.success_count = 0
-                    db.commit()
-                    
-                    job.total_docs_found += len(all_docs)
-                    job.target_docs_count += len(target_docs)
                     db.commit()
                     
                     # 3. 順次取得・解析
@@ -243,19 +314,19 @@ async def background_import_task(start_date: str, end_date: str, db_session_fact
                 status_row.error_message = str(e)
                 status_row.last_run_end_at = datetime.now()
                 db.commit()
-                log_system_event(db, "ERROR", "batch_sync", f"Error on {target_date_str}: {e}", error_details=traceback.format_exc())
+                log_system_event(db, "ERROR", "batch_sync", f"Error on {target_date_str}: {e}", job_id=job_id, error_details=traceback.format_exc())
 
         job.status = "success"
         job.finished_at = datetime.now()
         db.commit()
-        log_system_event(db, "INFO", "batch_sync", f"Batch sync completed: {job_id}")
+        log_system_event(db, "INFO", "batch_sync", f"Batch sync completed: {job_id}", job_id=job_id)
 
     except Exception as e:
         logger.error(f"Fatal error in background task: {e}")
         job.status = "failed"
         job.finished_at = datetime.now()
         db.commit()
-        log_system_event(db, "FATAL", "system", f"Fatal error in background sync: {e}", error_details=traceback.format_exc())
+        log_system_event(db, "FATAL", "system", f"Fatal error in background sync: {e}", job_id=job_id, error_details=traceback.format_exc())
     finally:
         db.close()
 
@@ -317,21 +388,30 @@ async def execute_import(
     _auth = Depends(verify_admin_or_key)
 ):
     is_include = include_completed == "on"
-    background_tasks.add_task(
-        background_import_task, 
-        start_date, 
-        end_date, 
-        database.SessionLocal,
-        is_include
-    )
     
+    # ジョブ ID を事前に生成して返却
+    job_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    
+    background_tasks.add_task(
+        background_import_task,
+        start_date,
+        end_date,
+        database.SessionLocal,
+        is_include,
+        job_id  # job_id を引数として渡す
+    )
+
     msg = f"{start_date} から {end_date} のインポートを開始しました。"
     if is_include:
         msg += "（完了済みの日付も再取得します）"
     else:
         msg += "（未実施またはエラーの日付のみを対象にします）"
-        
-    return {"status": "success", "message": msg}
+
+    return {
+        "status": "success",
+        "message": msg,
+        "job_id": job_id
+    }
 
 @router.post("/retry/{target_date}")
 async def retry_import(
@@ -340,14 +420,175 @@ async def retry_import(
     db: Session = Depends(database.get_db),
     _auth = Depends(verify_admin_or_key)
 ):
+    job_id = f"retry_{target_date}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     background_tasks.add_task(
-        background_import_task, 
-        target_date, 
-        target_date, 
+        background_import_task,
+        target_date,
+        target_date,
         database.SessionLocal,
-        True
+        True,
+        job_id
     )
-    return {"status": "success", "message": f"{target_date} の再取得を開始しました。"}
+    return {
+        "status": "success",
+        "message": f"{target_date} の再取得を開始しました。",
+        "job_id": job_id
+    }
+
+# =========================================================
+# 3. 進捗画面表示（HTML）
+# =========================================================
+@router.get("/progress", response_class=HTMLResponse)
+async def show_progress_page(
+    request: Request,
+    job_id: str = None,
+    db: Session = Depends(database.get_db),
+    _auth = Depends(verify_admin_or_key)
+):
+    """
+    進捗表示画面を表示（job_id パラメータがある場合は自動でポーリング開始）
+    """
+    return templates.TemplateResponse(
+        request=request,
+        name="job_progress.html",
+        context={
+            "job_id": job_id,
+            "current_user": None,  # verify_admin_or_key はダミーユーザーを返す可能性あり
+        }
+    )
+
+# =========================================================
+# 4. 進捗取得 API（ポーリング用）
+# =========================================================
+@router.get("/progress/{job_id}")
+async def get_job_progress(
+    job_id: str,
+    db: Session = Depends(database.get_db),
+    _auth = Depends(verify_admin_or_key)
+):
+    """
+    指定されたジョブの進捗情報を返す（ポーリング用 API）
+    """
+    # 1. ジョブ情報の取得
+    job = db.query(models.SyncJob).filter(models.SyncJob.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # 2. DocumentTask の集約（完了・エラー・処理中の数）
+    completed_tasks = db.query(models.DocumentTask).filter(
+        models.DocumentTask.job_id == job_id,
+        models.DocumentTask.status == 'completed'
+    ).count()
+    failed_tasks = db.query(models.DocumentTask).filter(
+        models.DocumentTask.job_id == job_id,
+        models.DocumentTask.status == 'failed'
+    ).count()
+    processing_tasks = db.query(models.DocumentTask).filter(
+        models.DocumentTask.job_id == job_id,
+        models.DocumentTask.status == 'processing'
+    ).count()
+
+    # total_tasks は SyncJob の target_docs_count を使用
+    total_tasks = job.target_docs_count or 0
+
+    # 3. system_events から日付範囲を取得
+    start_event = db.query(models.SystemEvent).filter(
+        models.SystemEvent.job_id == job_id,
+        models.SystemEvent.event_category == 'batch_sync',
+        models.SystemEvent.event_level == 'INFO',
+        models.SystemEvent.message.like('Batch sync started:%')
+    ).order_by(models.SystemEvent.created_at.asc()).first()
+
+    target_date_range = []
+    if start_event:
+        start_date, end_date = parse_date_range_from_message(start_event.message)
+        if start_date and end_date:
+            target_date_range = generate_date_range(start_date, end_date)
+
+    # 4. ImportDailyStatus の集約（ジョブの対象範囲内、またはジョブ開始以降に更新されたもの）
+    if target_date_range:
+        daily_statuses = db.query(models.ImportDailyStatus).filter(
+            models.ImportDailyStatus.target_date.in_(target_date_range)
+        ).order_by(models.ImportDailyStatus.target_date.asc()).all()
+    else:
+        daily_statuses = db.query(models.ImportDailyStatus).filter(
+            models.ImportDailyStatus.last_run_start_at >= job.started_at
+        ).order_by(models.ImportDailyStatus.target_date.asc()).all()
+
+    daily_status_list = []
+    for ds in daily_statuses:
+        # 所要時間の計算
+        duration_seconds = None
+        if ds.last_run_start_at and ds.last_run_end_at:
+            duration_seconds = int((ds.last_run_end_at - ds.last_run_start_at).total_seconds())
+
+        daily_status_list.append({
+            "target_date": ds.target_date,
+            "status": ds.status,
+            "total_docs_count": ds.total_docs_count or 0,
+            "target_docs_count": ds.target_docs_count or 0,
+            "success_count": ds.success_count or 0,
+            "error_message": ds.error_message,
+            "duration_seconds": duration_seconds,
+            "last_run_start_at": ds.last_run_start_at.isoformat() if ds.last_run_start_at else None
+        })
+
+    # 5. 最新のエラーイベント（直近 20 件）
+    recent_errors = db.query(models.SystemEvent).filter(
+        models.SystemEvent.event_level.in_(["ERROR", "FATAL"]),
+        models.SystemEvent.created_at >= job.started_at
+    ).order_by(models.SystemEvent.created_at.desc()).limit(20).all()
+
+    error_logs = [
+        {
+            "level": e.event_level,
+            "category": e.event_category,
+            "message": e.message,
+            "doc_id": e.doc_id,
+            "error_details": e.error_details,
+            "created_at": e.created_at.isoformat() if e.created_at else None
+        }
+        for e in recent_errors
+    ]
+
+    # 6. 進捗率の計算（完了数ベース）
+    progress_percent = 0
+    if total_tasks > 0:
+        progress_percent = round(completed_tasks / total_tasks * 100, 1)
+
+    # 7. 推定残り時間の計算（簡易）
+    estimated_remaining_seconds = None
+    if progress_percent > 0 and job.started_at:
+        elapsed_seconds = (datetime.now() - job.started_at).total_seconds()
+        total_estimated_seconds = elapsed_seconds / (progress_percent / 100)
+        remaining_seconds = total_estimated_seconds - elapsed_seconds
+        if remaining_seconds > 0:
+            estimated_remaining_seconds = int(remaining_seconds)
+
+    return {
+        "job_id": job.job_id,
+        "job_type": job.job_type,
+        "status": job.status,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+        "progress": {
+            "percent": progress_percent,
+            "total_tasks": total_tasks,
+            "completed_tasks": completed_tasks,
+            "failed_tasks": failed_tasks,
+            "processing_tasks": processing_tasks
+        },
+        "job_stats": {
+            "total_docs_found": job.total_docs_found or 0,
+            "target_docs_count": job.target_docs_count or 0,
+            "success_count": job.success_count or 0,
+            "error_count": job.error_count or 0
+        },
+        "target_date_range": target_date_range,
+        "daily_statuses": daily_status_list,
+        "estimated_remaining_seconds": estimated_remaining_seconds,
+        "recent_errors": error_logs
+    }
 
 # =========================================================
 # 2. 取り込みテスト画面

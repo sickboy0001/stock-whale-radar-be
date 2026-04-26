@@ -15,18 +15,18 @@ extra_css %}
   }
   .bg-completed {
     background-color: #198754;
-  } /* 🟩 */
+  }
   .bg-failed {
     background-color: #dc3545;
-  } /* 🟥 */
+  }
   .bg-processing {
     background-color: #ffc107;
     color: black;
-  } /* 🟨 */
+  }
   .bg-pending {
     background-color: #e9ecef;
     color: #6c757d;
-  } /* ⬜️ */
+  }
 </style>
 {% endblock %} {% block content %}
 <div class="container-fluid">
@@ -75,7 +75,7 @@ extra_css %}
               id="includeCompleted"
             />
             <label class="form-check-label small" for="includeCompleted">
-              completedも含む
+              completed も含む
             </label>
           </div>
           <button type="submit" class="btn btn-primary">
@@ -85,8 +85,8 @@ extra_css %}
         </div>
       </form>
       <div class="form-text mt-2 text-muted">
-        ※デフォルトでは未実施(pending) または
-        エラー(failed)の日付のみを対象に実行します。
+        ※デフォルトでは未実施 (pending) または エラー (failed)
+        の日付のみを対象に実行します。
       </div>
     </div>
   </div>
@@ -126,7 +126,7 @@ extra_css %}
       class="card-header bg-white d-flex justify-content-between align-items-center"
     >
       <h5 class="mb-0">
-        <i class="bi bi-list-task me-2"></i>直近の取り込み詳細 (最新30件)
+        <i class="bi bi-list-task me-2"></i>直近の取り込み詳細 (最新 30 件)
       </h5>
       <a
         href="/admin/import_daily_status/"
@@ -212,7 +212,7 @@ extra_css %}
           </tr>
           {% else %}
           <tr>
-            <td colspan="5" class="text-center text-muted py-4">
+            <td colspan="6" class="text-center text-muted py-4">
               データがありません。期間を指定してインポートを開始してください。
             </td>
           </tr>
@@ -233,6 +233,47 @@ extra_css %}
       return new bootstrap.Tooltip(tooltipTriggerEl);
     });
 
+    // 手動インポートフォームの非同期化
+    const manualImportForm = document.getElementById("manualImportForm");
+    if (manualImportForm) {
+      manualImportForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const formData = new FormData(manualImportForm);
+        const startDate = formData.get("start_date");
+        const endDate = formData.get("end_date");
+        const includeCompleted = formData.get("include_completed") === "on";
+
+        if (
+          !confirm(
+            `${startDate} から ${endDate} のインポートを開始しますか？\n（対象：${
+              includeCompleted ? "すべて" : "未実施またはエラーのみ"
+            }）`,
+          )
+        )
+          return;
+
+        try {
+          const response = await fetch("/admin/import_daily_status/import", {
+            method: "POST",
+            body: formData,
+          });
+          const data = await response.json();
+          if (data.status === "success") {
+            // ジョブ ID が返された場合、進捗画面へリダイレクト
+            if (data.job_id) {
+              window.location.href = `/admin/import_daily_status/progress?job_id=${data.job_id}`;
+            } else {
+              alert(data.message);
+            }
+          } else {
+            alert(`エラー：${data.message}`);
+          }
+        } catch (error) {
+          alert(`通信エラー：${error.message}`);
+        }
+      });
+    }
+
     window.retryImport = async function (date) {
       if (
         !confirm(`${date} の対象書類をすべてバックグラウンドで取り込みますか？`)
@@ -248,52 +289,19 @@ extra_css %}
         });
         const data = await response.json();
         if (data.status === "success") {
-          alert(data.message + "\n進捗はページを更新して確認してください。");
-          location.reload();
+          // ジョブ ID が返された場合、進捗画面へリダイレクト
+          if (data.job_id) {
+            window.location.href = `/admin/import_daily_status/progress?job_id=${data.job_id}`;
+          } else {
+            alert(data.message);
+          }
         } else {
-          alert(`エラー: ${data.message}`);
+          alert(`エラー：${data.message}`);
         }
       } catch (error) {
-        alert(`通信エラー: ${error.message}`);
+        alert(`通信エラー：${error.message}`);
       }
     };
-
-    // 手動インポートフォームの非同期化
-    const manualImportForm = document.getElementById("manualImportForm");
-    if (manualImportForm) {
-      manualImportForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const formData = new FormData(manualImportForm);
-        const startDate = formData.get("start_date");
-        const endDate = formData.get("end_date");
-        const includeCompleted = formData.get("include_completed") === "on";
-
-        if (
-          !confirm(
-            `${startDate} から ${endDate} のインポートを開始しますか？\n（対象: ${
-              includeCompleted ? "すべて" : "未実施またはエラーのみ"
-            }）`,
-          )
-        )
-          return;
-
-        try {
-          const response = await fetch("/admin/import_daily_status/import", {
-            method: "POST",
-            body: formData,
-          });
-          const data = await response.json();
-          if (data.status === "success") {
-            alert(data.message + "\n進捗はページを更新して確認してください。");
-            location.reload();
-          } else {
-            alert(`エラー: ${data.message}`);
-          }
-        } catch (error) {
-          alert(`通信エラー: ${error.message}`);
-        }
-      });
-    }
   });
 </script>
 {% endblock %}
