@@ -1,9 +1,9 @@
 name: Daily EDINET Import
 
-# 毎日 2 時に自動実行、および手動実行を許可
+# 毎日日本時間 2 時、4 時に自動実行、および手動実行を許可
 on:
   schedule:
-    - cron: "0 2 * * *"
+    - cron: "0 17,19 * * *"
   workflow_dispatch:
     inputs:
       start_date:
@@ -33,8 +33,8 @@ jobs:
               END_DATE=$START_DATE
             fi
           else
-            # 未指定の場合は 1 日前
-            START_DATE=$(date -d 'yesterday' +'%Y-%m-%d')
+            # 未指定の場合は日本時間の 1 日前
+            START_DATE=$(TZ='Asia/Tokyo' date -d '1 day ago' +'%Y-%m-%d')
             END_DATE=$START_DATE
           fi
 
